@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+logs/
+wandb/
+clips/
+policies/*.onnx
+microduck_rl/.venv/
+microduck_rl/logs/
+microduck_rl/wandb/
+microduck_rl/.pytest_cache/
+*.egg-info/
+.python-version
+

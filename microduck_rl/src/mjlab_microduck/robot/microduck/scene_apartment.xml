@@ -1,0 +1,64 @@
+<mujoco model="scene_apartment">
+    <!-- Tiny apartment for the book-courier day project: duck, paperback,
+         seated reader. No keyframes — the book freejoint changes nq;
+         infer_policy / view_apartment set qpos programmatically. -->
+    <include file="robot_allcollisions.xml" />
+    <include file="book.xml" />
+
+    <visual>
+        <headlight diffuse="0.55 0.5 0.45" ambient="0.35 0.32 0.28" specular="0.1 0.1 0.1" />
+        <rgba haze="0.22 0.18 0.14 1" />
+        <global azimuth="140" elevation="-18" offwidth="1280" offheight="720" />
+        <quality shadowsize="4096" />
+    </visual>
+
+    <asset>
+        <texture type="skybox" builtin="gradient" rgb1="0.55 0.48 0.42" rgb2="0.18 0.14 0.12"
+            width="512" height="3072" />
+        <texture type="2d" name="floorwood" builtin="checker" mark="edge"
+            rgb1="0.52 0.36 0.24" rgb2="0.42 0.28 0.18"
+            markrgb="0.62 0.44 0.30" width="300" height="300" />
+        <material name="floorwood" texture="floorwood" texuniform="true" texrepeat="8 8"
+            reflectance="0.08" />
+        <material name="rug" rgba="0.55 0.18 0.16 1" />
+        <material name="wall" rgba="0.91 0.86 0.78 1" />
+        <material name="chair" rgba="0.28 0.20 0.14 1" />
+        <material name="skin" rgba="0.76 0.58 0.48 1" />
+        <material name="shirt" rgba="0.22 0.28 0.38 1" />
+        <material name="pants" rgba="0.18 0.18 0.20 1" />
+        <material name="hair" rgba="0.12 0.09 0.08 1" />
+    </asset>
+
+    <worldbody>
+        <light pos="0.2 0.15 1.6" dir="0 -0.15 -1" diffuse="0.7 0.62 0.52" specular="0.15 0.12 0.08"/>
+        <light pos="-0.4 -0.3 1.2" dir="0.3 0.2 -1" diffuse="0.25 0.28 0.35"/>
+        <geom name="floor" size="0 0 0.05" pos="0 0 0" type="plane" material="floorwood" />
+
+        <!-- Rug the duck has to cross. -->
+        <geom name="rug" type="box" size="0.28 0.18 0.004" pos="0.32 0 0.004"
+              material="rug" contype="0" conaffinity="0" />
+
+        <!-- Three walls of a tiny room. -->
+        <geom name="wall_back" type="box" size="0.7 0.02 0.22" pos="0.2 0.45 0.22"
+              material="wall" contype="0" conaffinity="0" />
+        <geom name="wall_left" type="box" size="0.02 0.48 0.22" pos="-0.48 0 0.22"
+              material="wall" contype="0" conaffinity="0" />
+        <geom name="wall_right" type="box" size="0.02 0.48 0.22" pos="0.88 0 0.22"
+              material="wall" contype="0" conaffinity="0" />
+
+        <!-- Seated reader — slightly taller than the 25 cm duck, on the floor.
+             Delivery target for Courage to Be Disliked. -->
+        <body name="reader" pos="0.55 0 0">
+            <geom name="chair_seat" type="box" size="0.06 0.05 0.025" pos="0 0 0.025"
+                  material="chair" />
+            <geom name="legs" type="capsule" size="0.018 0.04" pos="0.01 0 0.07"
+                  euler="1.2 0 0" material="pants" contype="0" conaffinity="0" />
+            <geom name="torso" type="capsule" size="0.032 0.055" pos="0 0 0.16"
+                  material="shirt" />
+            <geom name="head" type="sphere" size="0.028" pos="0 0 0.245"
+                  material="skin" />
+            <geom name="hair" type="sphere" size="0.029" pos="0 -0.004 0.255"
+                  material="hair" contype="0" conaffinity="0" />
+        </body>
+    </worldbody>
+</mujoco>

@@ -1,0 +1,24 @@
+<mujoco model="courage_book">
+    <compiler angle="radian" autolimits="true"/>
+
+    <asset>
+        <material name="book_cover" rgba="0.82 0.22 0.18 1"/>
+        <material name="book_pages" rgba="0.93 0.88 0.74 1"/>
+        <material name="book_spine" rgba="0.18 0.12 0.10 1"/>
+    </asset>
+
+    <worldbody>
+        <!-- Duck-scale paperback (~7 × 4.5 × 1.2 cm, 40 g). Real book shrunk
+             to something a 25 cm biped can actually pick up with its beak. -->
+        <body name="book" pos="0.16 0 0.006">
+            <freejoint name="book_free"/>
+            <inertial pos="0 0 0" mass="0.04" diaginertia="7.2e-6 1.7e-5 2.3e-5"/>
+            <geom type="box" name="book_cover" size="0.035 0.0225 0.006"
+                  material="book_cover" friction="1.2 0.01 0.001"/>
+            <geom type="box" name="book_pages" size="0.033 0.020 0.0055"
+                  pos="0.001 0 0" material="book_pages" contype="0" conaffinity="0"/>
+            <geom type="box" name="book_spine" size="0.003 0.0225 0.006"
+                  pos="-0.032 0 0" material="book_spine" contype="0" conaffinity="0"/>
+        </body>
+    </worldbody>
+</mujoco>
