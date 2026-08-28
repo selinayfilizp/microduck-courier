@@ -63,6 +63,8 @@ export UV_LINK_MODE=copy
 mkdir -p /work && cd /work
 echo "[bootstrap] extracting source $SRC_TARBALL"
 tar -xzf "/src/$SRC_TARBALL"
+cd "/work/$PROJECT_SUBDIR"
+echo "[bootstrap] project directory: $(pwd)"
 
 echo "[bootstrap] uv sync"
 # Self-heal a poisoned persistent cache: a bad entry fails sync
@@ -313,6 +315,17 @@ def submit(argv: list[str]) -> int:
         return 1
 
     repo_root = _repo_root()
+    try:
+        project_subdir = Path.cwd().resolve().relative_to(repo_root.resolve())
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Current directory {Path.cwd()} is outside Git root {repo_root}"
+        ) from exc
+    if not (repo_root / project_subdir / "pyproject.toml").is_file():
+        raise RuntimeError(
+            "Run the submission command from the Python project directory "
+            f"containing pyproject.toml (current: {repo_root / project_subdir})."
+        )
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
     run_name = args.run_name or f"{args.task}-{stamp}".lower()
     src_repo = args.src_repo or f"{namespace}/mjlab-microduck-src"
@@ -320,8 +333,11 @@ def submit(argv: list[str]) -> int:
 
     env: dict[str, str] = {
         "CKPT_REPO": ckpt_repo,
+        "PROJECT_SUBDIR": project_subdir.as_posix() or ".",
         "TRAIN_ARGS": " ".join(shlex.quote(a) for a in [args.task, *train_args]),
     }
+    if args.no_wandb:
+        env["WANDB_MODE"] = "disabled"
     secrets: dict[str, str] = {"HF_TOKEN": token}
 
     # Forward wandb credentials (env var, then ~/.netrc)

@@ -5005,6 +5005,11 @@ class GroundPickPhaseCommand(UniformVelocityCommand):
                 self._gp_phase[env_ids] = torch.rand(len(env_ids), device=self.device)
             else:
                 self._gp_phase[env_ids] = 0.0
+            # Courier reset events run before command resets. Preserve their
+            # reverse-curriculum start phase instead of overwriting it here.
+            phase_start = getattr(self._env, "_courier_phase_start", None)
+            if phase_start is not None:
+                self._gp_phase[env_ids] = phase_start[env_ids]
         return {}
 
     def _resample_command(self, env_ids: torch.Tensor) -> None:
@@ -7200,7 +7205,8 @@ def roulade_lateral_velocity_penalty(
 # Grasp is kinematic (same trick as ground-pick's mouth payload): when the
 # mouth tip is close enough during pick/carry, the book is welded to the
 # beak until the place phase AND the book is near the reader. The actor
-# stays 61-D; book / person / grasp live on the critic.
+# stays 61-D; the actor receives book / grasp and person coordinates through
+# the existing head/body command slots while the critic keeps explicit copies.
 
 COURIER_PICK_END = 0.35
 COURIER_CARRY_END = 0.75
@@ -7222,10 +7228,13 @@ def _courier_buffers(env: ManagerBasedRlEnv) -> None:
     dev = env.device
     if not hasattr(env, "_courier_grasped"):
         env._courier_grasped = torch.zeros(n, dtype=torch.bool, device=dev)
+        env._courier_was_grasped = torch.zeros(n, dtype=torch.bool, device=dev)
         env._courier_person_xy = torch.zeros(n, 2, device=dev)
         env._courier_person_xy[:, 0] = 0.55
         env._courier_prev_place_dist = torch.zeros(n, device=dev)
         env._courier_delivered = torch.zeros(n, dtype=torch.bool, device=dev)
+        env._courier_was_delivered = torch.zeros(n, dtype=torch.bool, device=dev)
+        env._courier_phase_start = torch.zeros(n, device=dev)
 
 
 def reset_courier_props(
@@ -7237,14 +7246,24 @@ def reset_courier_props(
     person_noise_xy: float = 0.03,
     book_half_z: float = COURIER_BOOK_HALF_Z,
     asset_name: str = "book",
+    reader_name: str = "reader",
+    pregrasp_fraction: float = 0.0,
+    near_reader_fraction: float = 0.0,
+    near_reader_offset: float = 0.14,
 ):
-    """Place the book in front of the duck and stash the reader XY for the episode."""
+    """Reset the delivery scene, with optional reverse-curriculum starts.
+
+    Training mixes full pick episodes with pre-grasped carry episodes and a
+    smaller set of near-reader placement episodes. Play/evaluation passes zero
+    fractions and therefore always starts from the complete task.
+    """
     if env_ids is None or len(env_ids) == 0:
         return
     env_ids = env_ids.to(env.device)
     _courier_buffers(env)
     robot: Entity = env.scene["robot"]
     book: Entity = env.scene[asset_name]
+    reader: Entity = env.scene[reader_name]
 
     root = env.sim.data.qpos[env_ids][:, robot.indexing.free_joint_q_adr]
     qw, qx, qy, qz = root[:, 3], root[:, 4], root[:, 5], root[:, 6]
@@ -7264,17 +7283,46 @@ def reset_courier_props(
     book.write_root_link_pose_to_sim(pose, env_ids)
     book.write_root_link_velocity_to_sim(torch.zeros(n, 6, device=env.device), env_ids)
 
+    if not 0.0 <= near_reader_fraction <= pregrasp_fraction <= 1.0:
+        raise ValueError(
+            "Expected 0 <= near_reader_fraction <= pregrasp_fraction <= 1"
+        )
+    curriculum_draw = torch.rand(n, device=env.device)
+    pregrasp = curriculum_draw < pregrasp_fraction
+    near_reader = curriculum_draw < near_reader_fraction
+
     p_off = torch.tensor(person_offset, device=env.device, dtype=torch.float).repeat(n, 1)
     p_off += (torch.rand(n, 2, device=env.device) * 2.0 - 1.0) * person_noise_xy
+    p_off[near_reader] = torch.tensor(
+        (near_reader_offset, 0.0), device=env.device, dtype=torch.float
+    )
     env._courier_person_xy[env_ids, 0] = origin[:, 0] + cos_y * p_off[:, 0] - sin_y * p_off[:, 1]
     env._courier_person_xy[env_ids, 1] = origin[:, 1] + sin_y * p_off[:, 0] + cos_y * p_off[:, 1]
 
-    env._courier_grasped[env_ids] = False
+    reader_pose = torch.zeros(n, 7, device=env.device)
+    reader_pose[:, :2] = env._courier_person_xy[env_ids]
+    reader_pose[:, 2] = origin[:, 2]
+    reader_pose[:, 3] = 1.0
+    reader.write_mocap_pose_to_sim(reader_pose, env_ids)
+
+    env._courier_grasped[env_ids] = pregrasp
+    # Curriculum latches are initial state, not earned grasp events.
+    env._courier_was_grasped[env_ids] = pregrasp
     env._courier_delivered[env_ids] = False
+    env._courier_was_delivered[env_ids] = False
+    env._courier_phase_start[env_ids] = 0.0
+    env._courier_phase_start[env_ids[pregrasp]] = COURIER_PICK_END + 0.01
+    env._courier_phase_start[env_ids[near_reader]] = COURIER_CARRY_END + 0.01
     book_xy = pose[:, :2]
     env._courier_prev_place_dist[env_ids] = torch.linalg.norm(
         book_xy - env._courier_person_xy[env_ids], dim=-1
     )
+
+    cmd = env.command_manager.get_term("twist")
+    phase = getattr(cmd, "_gp_phase", None)
+    if phase is not None and pregrasp.any():
+        # Also write immediately for reset orders where commands run first.
+        phase[env_ids] = env._courier_phase_start[env_ids]
 
 
 def courier_update_grasp(
@@ -7345,26 +7393,62 @@ def courier_grasp_edge(
 ) -> torch.Tensor:
     """+1 on the step the latch closes — not a per-step jackpot."""
     _courier_buffers(env)
-    if not hasattr(env, "_courier_was_grasped"):
-        env._courier_was_grasped = env._courier_grasped.clone()
     edge = env._courier_grasped & ~env._courier_was_grasped
     env._courier_was_grasped = env._courier_grasped.clone()
     return edge.float()
 
 
+def courier_update_grasp_edge(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
+    book_name: str = "book",
+    grasp_dist: float = COURIER_GRASP_DIST,
+    place_dist: float = COURIER_PLACE_DIST,
+) -> torch.Tensor:
+    """Update the grasp/carry state and pay once when the latch closes.
+
+    This must be a non-zero reward term: mjlab's RewardManager intentionally
+    skips weight-0 terms, so a separate zero-weight side-effect hook never runs.
+    """
+    courier_update_grasp(
+        env,
+        asset_cfg=asset_cfg,
+        book_name=book_name,
+        grasp_dist=grasp_dist,
+        place_dist=place_dist,
+    )
+    return courier_grasp_edge(env)
+
+
 def courier_carry_progress(
     env: ManagerBasedRlEnv,
     book_name: str = "book",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    max_tilt_deg: float = 45.0,
 ) -> torch.Tensor:
-    """Potential on book→reader distance, only while carrying. Unfarmable hold."""
+    """Potential velocity toward the reader while carrying and upright.
+
+    RewardManager multiplies every term by ``step_dt``. Dividing the distance
+    delta here avoids applying time scaling twice, so a completed 0.4 m carry
+    has the same return at any control frequency.
+    """
     _courier_buffers(env)
     book: Entity = env.scene[book_name]
     dist = torch.linalg.norm(book.data.root_link_pos_w[:, :2] - env._courier_person_xy, dim=-1)
-    delta = env._courier_prev_place_dist - dist
+    # This term is a progress bonus, not a regression penalty. In pre-grasp
+    # curriculum resets the first kinematic carry update moves the floor book
+    # to the mouth and can temporarily increase target distance.
+    delta = torch.clamp(env._courier_prev_place_dist - dist, min=0.0)
     env._courier_prev_place_dist = dist.detach()
     phase = _courier_phase(env)
     gate = ((phase >= COURIER_PICK_END) & (phase < COURIER_CARRY_END) & env._courier_grasped).float()
-    return torch.nan_to_num(delta * gate, nan=0.0)
+    robot: Entity = env.scene[asset_cfg.name]
+    upright = (
+        -robot.data.projected_gravity_b[:, 2]
+        > math.cos(math.radians(max_tilt_deg))
+    ).float()
+    step_dt = max(float(env.step_dt), 1.0e-6)
+    return torch.nan_to_num((delta / step_dt) * gate * upright, nan=0.0)
 
 
 def courier_place_success(
@@ -7372,7 +7456,7 @@ def courier_place_success(
     book_name: str = "book",
     std: float = 0.08,
 ) -> torch.Tensor:
-    """Book on the floor near the reader after release. Rate-limited by phase."""
+    """One-shot reward when a released book reaches the reader's feet."""
     _courier_buffers(env)
     book: Entity = env.scene[book_name]
     phase = _courier_phase(env)
@@ -7380,9 +7464,24 @@ def courier_place_success(
     z = book.data.root_link_pos_w[:, 2]
     near = torch.exp(-(xy / std) ** 2)
     on_floor = torch.exp(-((z - COURIER_BOOK_HALF_Z) / 0.03) ** 2)
-    released = (~env._courier_grasped).float()
+    delivered_edge = env._courier_delivered & ~env._courier_was_delivered
+    env._courier_was_delivered = env._courier_delivered.clone()
     gate = (phase >= COURIER_CARRY_END).float()
-    return torch.nan_to_num(near * on_floor * released * gate, nan=0.0)
+    return torch.nan_to_num(near * on_floor * delivered_edge.float() * gate, nan=0.0)
+
+
+def courier_is_delivered(env: ManagerBasedRlEnv) -> torch.Tensor:
+    """Terminate successful training episodes; play mode keeps the final shot."""
+    _courier_buffers(env)
+    return env._courier_delivered
+
+
+def courier_failed_episode(env: ManagerBasedRlEnv) -> torch.Tensor:
+    """One-shot cost for non-timeout termination, excluding delivery success."""
+    _courier_buffers(env)
+    return (
+        env.termination_manager.terminated & ~env._courier_delivered
+    ).float()
 
 
 def courier_book_pos_in_base(
@@ -7417,3 +7516,21 @@ def courier_grasp_flag(
     """1 if the book is currently latched to the beak. Critic-only."""
     _courier_buffers(env)
     return env._courier_grasped.float().unsqueeze(-1)
+
+
+def courier_book_command(
+    env: ManagerBasedRlEnv,
+    asset_name: str = "book",
+) -> torch.Tensor:
+    """4D actor command slot: book xyz in base frame plus grasp flag."""
+    return torch.cat(
+        (courier_book_pos_in_base(env, asset_name), courier_grasp_flag(env)), dim=-1
+    )
+
+
+def courier_person_command(env: ManagerBasedRlEnv) -> torch.Tensor:
+    """6D actor command slot: reader xyz in base frame plus three zero pads."""
+    person = courier_person_pos_in_base(env)
+    return torch.cat(
+        (person, torch.zeros(env.num_envs, 3, device=env.device)), dim=-1
+    )

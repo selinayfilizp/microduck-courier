@@ -20,6 +20,8 @@ MICRODUCK_ALLCOLLISIONS_XML: Path = _ROBOT_DIR / "robot_allcollisions.xml"
 MICRODUCK_BALL_XML: Path = _ROBOT_DIR / "ball.xml"
 # Duck-scale paperback for the book-courier task.
 MICRODUCK_BOOK_XML: Path = _ROBOT_DIR / "book.xml"
+MICRODUCK_READER_XML: Path = _ROBOT_DIR / "reader.xml"
+MICRODUCK_APARTMENT_PROPS_XML: Path = _ROBOT_DIR / "apartment_props.xml"
 # Roller-skate model: 14 actuated joints + passive wheel hinges (passive_*wheel).
 MICRODUCK_ALLCOLLISIONS_ROLLERS_XML: Path = _ROBOT_DIR / "robot_allcollisions_rollers.xml"
 # Backlash models: every servo joint gets an unactuated passive_<joint>_backlash
@@ -33,6 +35,8 @@ assert MICRODUCK_WALK_XML.exists(), f"XML not found: {MICRODUCK_WALK_XML}"
 assert MICRODUCK_ALLCOLLISIONS_XML.exists(), f"XML not found: {MICRODUCK_ALLCOLLISIONS_XML}"
 assert MICRODUCK_BALL_XML.exists(), f"XML not found: {MICRODUCK_BALL_XML}"
 assert MICRODUCK_BOOK_XML.exists(), f"XML not found: {MICRODUCK_BOOK_XML}"
+assert MICRODUCK_READER_XML.exists(), f"XML not found: {MICRODUCK_READER_XML}"
+assert MICRODUCK_APARTMENT_PROPS_XML.exists(), f"XML not found: {MICRODUCK_APARTMENT_PROPS_XML}"
 assert MICRODUCK_ALLCOLLISIONS_ROLLERS_XML.exists(), f"XML not found: {MICRODUCK_ALLCOLLISIONS_ROLLERS_XML}"
 assert MICRODUCK_ALLCOLLISIONS_BACKLASH_XML.exists(), f"XML not found: {MICRODUCK_ALLCOLLISIONS_BACKLASH_XML}"
 assert MICRODUCK_WALK_BACKLASH_XML.exists(), f"XML not found: {MICRODUCK_WALK_BACKLASH_XML}"
@@ -63,6 +67,14 @@ def get_ball_spec() -> mujoco.MjSpec:
 
 def get_book_spec() -> mujoco.MjSpec:
     return mujoco.MjSpec.from_file(str(MICRODUCK_BOOK_XML))
+
+
+def get_reader_spec() -> mujoco.MjSpec:
+    return mujoco.MjSpec.from_file(str(MICRODUCK_READER_XML))
+
+
+def get_apartment_props_spec() -> mujoco.MjSpec:
+    return mujoco.MjSpec.from_file(str(MICRODUCK_APARTMENT_PROPS_XML))
 
 
 def get_backlash_spec() -> mujoco.MjSpec:
@@ -246,6 +258,16 @@ MICRODUCK_BALL_CFG = EntityCfg(
 MICRODUCK_BOOK_CFG = EntityCfg(
     spec_fn=get_book_spec,
     init_state=EntityCfg.InitialStateCfg(pos=(0.16, 0.0, 0.006)),
+)
+
+MICRODUCK_READER_CFG = EntityCfg(
+    spec_fn=get_reader_spec,
+    init_state=EntityCfg.InitialStateCfg(pos=(0.55, 0.0, 0.0)),
+)
+
+MICRODUCK_APARTMENT_PROPS_CFG = EntityCfg(
+    spec_fn=get_apartment_props_spec,
+    init_state=EntityCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0)),
 )
 
 # Roller skate robot: the 4 passive wheel joints (passive_*wheel) have no XML

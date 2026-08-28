@@ -1,0 +1,24 @@
+<mujoco model="courier_apartment_props">
+    <compiler angle="radian" autolimits="true"/>
+    <asset>
+        <material name="courier_rug" rgba="0.55 0.18 0.16 1"/>
+        <material name="courier_wall" rgba="0.91 0.86 0.78 1"/>
+    </asset>
+    <worldbody>
+        <!-- Non-colliding set dressing for trained-policy playback. -->
+        <body name="apartment_props" pos="0 0 0">
+            <geom name="courier_rug_geom" type="box" size="0.28 0.18 0.004"
+                  pos="0.32 0 0.004" material="courier_rug"
+                  contype="0" conaffinity="0"/>
+            <geom name="courier_wall_back" type="box" size="0.7 0.02 0.22"
+                  pos="0.2 0.45 0.22" material="courier_wall"
+                  contype="0" conaffinity="0"/>
+            <geom name="courier_wall_left" type="box" size="0.02 0.48 0.22"
+                  pos="-0.48 0 0.22" material="courier_wall"
+                  contype="0" conaffinity="0"/>
+            <geom name="courier_wall_right" type="box" size="0.02 0.48 0.22"
+                  pos="0.88 0 0.22" material="courier_wall"
+                  contype="0" conaffinity="0"/>
+        </body>
+    </worldbody>
+</mujoco>

@@ -11,8 +11,9 @@ cycle:
 Grasp is kinematic (mouth-proximity latch), matching ground-pick's payload
 trick: the real robot's beak is a linkage, not a 15th actuator. The actor
 stays on the unified 61-D obs contract so a trained courier ONNX can
-hot-swap with walk / ground-pick. Book, reader, and grasp flag are
-critic-only.
+hot-swap with walk / ground-pick. The existing command slots carry the book
+position plus grasp flag and the reader position, so the actor can observe the
+delivery task without changing that contract.
 
 Reward the delivery, not looking cute: pick proximity, a one-shot grasp
 edge, potential-based carry progress, and a place Gaussian. Standing /
@@ -78,7 +79,9 @@ from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
 from mjlab_microduck.robot.microduck_constants import (
+    MICRODUCK_APARTMENT_PROPS_CFG,
     MICRODUCK_BOOK_CFG,
+    MICRODUCK_READER_CFG,
     MICRODUCK_STANDUP_ROBOT_CFG,
 )
 from mjlab_microduck.tasks import mdp as microduck_mdp
@@ -115,9 +118,17 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     cfg.scene.entities = {
         "robot": MICRODUCK_STANDUP_ROBOT_CFG,
         "book": MICRODUCK_BOOK_CFG,
+        "reader": MICRODUCK_READER_CFG,
+        "apartment": MICRODUCK_APARTMENT_PROPS_CFG,
     }
     cfg.scene.sensors = (feet_ground_cfg, self_collision_cfg)
     cfg.viewer.body_name = "trunk_base"
+    cfg.viewer.origin_type = cfg.viewer.OriginType.WORLD
+    cfg.viewer.lookat = (0.28, 0.0, 0.08)
+    cfg.viewer.distance = 0.70
+    cfg.viewer.elevation = -18.0
+    cfg.viewer.azimuth = 120.0
+    cfg.viewer.max_extra_envs = 0
     cfg.episode_length_s = EPISODE_LENGTH_S
     cfg.sim.nconmax = 50
 
@@ -138,18 +149,9 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         if name in cfg.rewards:
             del cfg.rewards[name]
 
-    # Side-effect hook: latch + kinematic carry. Must stay weight 0.
-    cfg.rewards["courier_grasp_update"] = RewardTermCfg(
-        func=microduck_mdp.courier_update_grasp,
-        weight=0.0,
-        params={
-            "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
-            "book_name": "book",
-        },
-    )
     cfg.rewards["pick_proximity"] = RewardTermCfg(
         func=microduck_mdp.courier_pick_proximity,
-        weight=4.0,
+        weight=8.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
             "book_name": "book",
@@ -157,41 +159,55 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         },
     )
     cfg.rewards["grasp_edge"] = RewardTermCfg(
-        func=microduck_mdp.courier_grasp_edge,
-        weight=6.0,
+        # This non-zero term also updates the kinematic grasp before all
+        # carry/place rewards. RewardManager skips weight-0 terms entirely.
+        func=microduck_mdp.courier_update_grasp_edge,
+        weight=12.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
+            "book_name": "book",
+        },
     )
     cfg.rewards["carry_progress"] = RewardTermCfg(
         func=microduck_mdp.courier_carry_progress,
-        weight=8.0,
-        params={"book_name": "book"},
+        weight=20.0,
+        params={
+            "book_name": "book",
+            "asset_cfg": SceneEntityCfg("robot"),
+            "max_tilt_deg": 45.0,
+        },
     )
     cfg.rewards["place_success"] = RewardTermCfg(
         func=microduck_mdp.courier_place_success,
-        weight=5.0,
+        weight=250.0,
         params={"book_name": "book", "std": 0.08},
+    )
+    cfg.rewards["failed_episode"] = RewardTermCfg(
+        func=microduck_mdp.courier_failed_episode,
+        weight=-500.0,
     )
 
     cfg.rewards["feet_grounded"] = RewardTermCfg(
         func=microduck_mdp.feet_grounded_reward,
-        weight=2.0,
+        weight=0.25,
         params={"sensor_name": feet_ground_cfg.name},
     )
     cfg.rewards["pose_stand_legs"] = RewardTermCfg(
         func=microduck_mdp.pose_target_match,
-        weight=1.5,
+        weight=0.15,
         params={"std": 0.5, "joint_indices": _LEG_JOINTS, "target_overrides": None},
     )
     cfg.rewards["pose_stand_neck"] = RewardTermCfg(
         func=microduck_mdp.pose_target_match,
-        weight=0.8,
+        weight=0.08,
         params={"std": 0.35, "joint_indices": _NECK_JOINTS, "target_overrides": None},
     )
     cfg.rewards["upright"].params["asset_cfg"].body_names = ("trunk_base",)
-    cfg.rewards["upright"].weight = 2.0
+    cfg.rewards["upright"].weight = 0.25
     cfg.rewards["upright"].params["std"] = math.sqrt(0.05)
     cfg.rewards["height_stand"] = RewardTermCfg(
         func=microduck_mdp.height_target_gaussian,
-        weight=1.0,
+        weight=0.1,
         params={
             "std": 0.04,
             "target_height": STAND_Z,
@@ -262,12 +278,17 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     else:
         cfg.events.pop("encoder_bias", None)
 
+    # Preserve the unified 61-D actor contract while making the task observable:
+    # head-command slot = book xyz in base frame + grasp flag (4D)
+    # body-command slot = reader xyz in base frame + zero padding (6D)
+    # A deployed courier must fill the same slots from perception.
     for group in ("actor", "critic"):
         cfg.observations[group].terms["head_command"] = ObservationTermCfg(
-            func=microduck_mdp.zero_command_padding, params={"dim": 4},
+            func=microduck_mdp.courier_book_command,
+            params={"asset_name": "book"},
         )
         cfg.observations[group].terms["body_command"] = ObservationTermCfg(
-            func=microduck_mdp.zero_command_padding, params={"dim": 6},
+            func=microduck_mdp.courier_person_command,
         )
 
     cfg.observations["critic"].terms["book_position"] = ObservationTermCfg(
@@ -283,6 +304,7 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     command: object = cfg.commands["twist"]
     command.rel_standing_envs = 0.0
     command.rel_heading_envs = 0.0
+    command.debug_vis = False
     cfg.commands["twist"] = microduck_mdp.GroundPickPhaseCommandCfg(
         **{
             **vars(command),
@@ -330,8 +352,17 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
             "book_noise_xy": BOOK_NOISE_XY,
             "person_noise_xy": PERSON_NOISE_XY,
             "asset_name": "book",
+            "reader_name": "reader",
+            "pregrasp_fraction": 0.0 if play else 0.5,
+            "near_reader_fraction": 0.0 if play else 0.25,
         },
     )
+
+    if not play:
+        cfg.terminations["delivered"] = TerminationTermCfg(
+            func=microduck_mdp.courier_is_delivered,
+            time_out=False,
+        )
 
     if ENABLE_VELOCITY_PUSHES:
         interval = (2.0, 4.0) if play else VELOCITY_PUSH_INTERVAL_S
@@ -435,6 +466,13 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
                 ],
             },
         )
+    if play:
+        # Evaluation/recording should exercise the configured perturbation.
+        # Leaving the training curricula active would immediately rewrite the
+        # play-mode push range to the step-0 value of exactly zero.
+        cfg.curriculum.pop("action_rate_weight", None)
+        cfg.curriculum.pop("com_range", None)
+        cfg.curriculum.pop("push_magnitude", None)
     return cfg
 
 

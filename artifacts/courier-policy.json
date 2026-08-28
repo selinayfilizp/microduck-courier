@@ -1,0 +1,29 @@
+{
+  "checkpoint": "microduck-courier-model_750.pt",
+  "output": "microduck-courier-trained-policy.mp4",
+  "seed": 14,
+  "seconds": 20.0,
+  "fps": 30,
+  "frames": 600,
+  "grasp_times_s": [
+    2.88,
+    10.8,
+    18.76
+  ],
+  "failure_times_s": [],
+  "delivery_times_s": [
+    6.04,
+    14.02
+  ],
+  "story_push": {
+    "axis": "world_y",
+    "time_s": 1.4,
+    "delta_velocity_m_s": 0.0,
+    "applied": false
+  },
+  "max_tilt_deg": 61.15603267147626,
+  "stumble_time_s": 0.64,
+  "recovery_time_s": 3.58,
+  "stumble_recovery_before_success": true,
+  "failure_before_success": false
+}

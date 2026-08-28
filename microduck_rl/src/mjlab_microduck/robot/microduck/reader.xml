@@ -1,0 +1,31 @@
+<mujoco model="courier_reader">
+    <compiler angle="radian" autolimits="true"/>
+    <asset>
+        <material name="courier_chair" rgba="0.28 0.20 0.14 1"/>
+        <material name="courier_skin" rgba="0.76 0.58 0.48 1"/>
+        <material name="courier_shirt" rgba="0.22 0.28 0.38 1"/>
+        <material name="courier_pants" rgba="0.18 0.18 0.20 1"/>
+        <material name="courier_hair" rgba="0.12 0.09 0.08 1"/>
+    </asset>
+    <worldbody>
+        <!-- Visual target only. The reward target follows this mocap-wrapped
+             fixed entity; collisions stay off so the duck cannot farm contact. -->
+        <body name="reader" pos="0 0 0">
+            <geom name="reader_chair" type="box" size="0.06 0.05 0.025"
+                  pos="0 0 0.025" material="courier_chair"
+                  contype="0" conaffinity="0"/>
+            <geom name="reader_legs" type="capsule" size="0.018 0.04"
+                  pos="0.01 0 0.07" euler="1.2 0 0" material="courier_pants"
+                  contype="0" conaffinity="0"/>
+            <geom name="reader_torso" type="capsule" size="0.032 0.055"
+                  pos="0 0 0.16" material="courier_shirt"
+                  contype="0" conaffinity="0"/>
+            <geom name="reader_head" type="sphere" size="0.028"
+                  pos="0 0 0.245" material="courier_skin"
+                  contype="0" conaffinity="0"/>
+            <geom name="reader_hair" type="sphere" size="0.029"
+                  pos="0 -0.004 0.255" material="courier_hair"
+                  contype="0" conaffinity="0"/>
+        </body>
+    </worldbody>
+</mujoco>
