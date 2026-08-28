@@ -4,18 +4,22 @@ One-day physical-AI project: teach a [Microduck](https://pollen-robotics.com/mic
 
 Pick → carry → place. Reward the delivery, not looking cute.
 
+![The trained policy stumbles to 61 degrees, recovers, grasps the book, and delivers it to the reader](artifacts/courier-policy.gif)
+
+*First episode of the real trained rollout: stumble at 0.6 s, recovery, grasp at 2.9 s, delivery at the reader's feet at 6.0 s. The full 20-second clip and its telemetry are in [Release artifacts](#release-artifacts).*
+
 Clone: `git clone https://github.com/selinayfilizp/microduck-courier.git`
 
 Other agents: read `AGENTS.md` first. This repo is the source of truth (Pollen’s RL stack is vendored under `microduck_rl/`, not a nested clone).
 
 ## What’s here
 
-- `microduck_rl/` — Pollen’s RL stack, plus a new task `Mjlab-Courier-Flat-MicroDuck`
-- `microduck_rl/src/mjlab_microduck/robot/microduck/scene_apartment.xml` — floor, rug, paperback, seated reader
-- `policies/` — local 61-D ONNX brains, including the exported courier policy
-- `artifacts/` — verified trained-policy clip, telemetry, and deployable ONNX
+- `microduck_rl/`: Pollen’s RL stack, plus a new task `Mjlab-Courier-Flat-MicroDuck`
+- `microduck_rl/src/mjlab_microduck/robot/microduck/scene_apartment.xml`: floor, rug, paperback, seated reader
+- `policies/`: local 61-D ONNX brains, including the exported courier policy
+- `artifacts/`: verified trained-policy clip, telemetry, and deployable ONNX
 
-This Mac has an M4, not CUDA. Walking in the viewer is CPU MuJoCo. Training the courier policy needs a GPU — use Hugging Face Jobs.
+This Mac has an M4, not CUDA. Walking in the viewer is CPU MuJoCo. Training the courier policy needs a GPU; use Hugging Face Jobs.
 
 Install [uv](https://docs.astral.sh/uv/) once (`brew install uv` or see their docs) before the walking / train commands.
 
@@ -34,7 +38,7 @@ Walk it with the official gait (arrow keys in the terminal, not the viewer):
 ./play_apartment.sh
 ```
 
-`G` triggers ground-pick (beak to the floor — the pick half of the job).
+`G` triggers ground-pick (beak to the floor, the pick half of the job).
 
 ## 2. Trained courier policy
 
@@ -113,6 +117,10 @@ uv run python scripts/record_courier_policy.py \
 The recorder uses the actual mjlab environment and policy observations and emits
 a JSON sidecar with grasp, stumble, recovery, and delivery times. Publish that
 file as the RL result; keep the watermarked storyboard only as a shot plan.
+
+Play mode resets every 8 seconds with a fresh spawn heading while the camera
+stays fixed, so the first episode carries the framed story; later episodes can
+drift out of view. Cut to the first 8 seconds when the clip has to stand alone.
 
 ## Release artifacts
 

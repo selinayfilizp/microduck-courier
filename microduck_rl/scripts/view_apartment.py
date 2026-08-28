@@ -192,7 +192,7 @@ def _relaunch_quiet_on_macos() -> None:
 
         Task policy set failed: 4 ((os/kern) invalid argument)
 
-    from Apple's thread-QoS APIs. That is not a scene/load failure — filter it.
+    from Apple's thread-QoS APIs. That is not a scene/load failure; filter it.
     """
     if sys.platform != "darwin":
         return
@@ -206,7 +206,7 @@ def _relaunch_quiet_on_macos() -> None:
             "  mjpython scripts/view_apartment.py"
         )
     print("Opening the apartment window. Drag to look around, Esc to quit.")
-    print("(macOS may log a 'Task policy' warning — that's noise, not a crash.)")
+    print("(macOS may log a 'Task policy' warning; that's noise, not a crash.)")
     proc = subprocess.Popen(
         [mjpython, os.path.abspath(__file__), *sys.argv[1:]],
         stderr=subprocess.PIPE,
@@ -229,7 +229,7 @@ def view():
     import mujoco.viewer
 
     print("Apartment scene. Duck is standing. Book is in front. Reader is sitting.")
-    print("This is the pose viewer — for a walking duck, run ./play_apartment.sh")
+    print("This is the pose viewer; for a walking duck, run ./play_apartment.sh")
     with mujoco.viewer.launch_passive(model, data) as viewer:
         while viewer.is_running():
             _hold(mujoco, model, data, qpos0)

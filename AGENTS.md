@@ -1,4 +1,4 @@
-# Agent notes — microduck-courier
+# Agent notes: microduck-courier
 
 Day project: a Microduck delivers *The Courage to Be Disliked* across a tiny apartment.
 
@@ -10,7 +10,7 @@ Day project: a Microduck delivers *The Courage to Be Disliked* across a tiny apa
 
 ## Do next, in order
 
-1. `bash scripts/fetch_policies.sh` — walking / stand / ground-pick ONNX (gitignored, ~3 MB).
+1. `bash scripts/fetch_policies.sh`: walking / stand / ground-pick ONNX (gitignored, ~3 MB).
 2. Pose viewer: `python3 microduck_rl/scripts/view_apartment.py` (macOS: MuJoCo needs `mjpython`; “Task policy set failed” is a Cocoa QoS warning, already filtered).
 3. Walk in the apartment: `./play_apartment.sh` (arrow keys in the **terminal**, `G` = ground pick).
 4. Train: CUDA GPU or `uv run train Mjlab-Courier-Flat-MicroDuck --hf-jobs …`. This laptop is M4 / no CUDA.

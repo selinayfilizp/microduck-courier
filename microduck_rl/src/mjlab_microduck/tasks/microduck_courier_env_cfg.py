@@ -1,4 +1,4 @@
-"""Microduck book-courier task — pick, carry, place a duck-scale paperback.
+"""Microduck book-courier task: pick, carry, place a duck-scale paperback.
 
 The duck starts standing with *The Courage to Be Disliked* on the floor in
 front of it and a seated reader a few body-lengths away. One 8 s phase
