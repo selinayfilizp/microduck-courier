@@ -67,6 +67,7 @@ COURIER_WIDE_PERIOD = 14.0
 WIDE_HOLD_EPS = 0.02
 WIDE_HANDOFF_DIST = 0.18
 WIDE_SETTLE_STEPS = 5
+WIDE_PICK_BUDGET_S = 5.0
 WIDE_SPAWN_FINAL = {
     "book_radius_range": (0.12, 0.35),
     "book_bearing_deg": 60.0,
@@ -199,19 +200,21 @@ def make_microduck_courier_env_cfg(
             del cfg.rewards[name]
 
     # v1: absolute Gaussian, safe under the bounded wall-clock pick window.
-    # wide: potential-based (pay only approach progress), because the state-
-    # gated phase clock can hold the pick segment open all episode and a
-    # per-step absolute bonus would make hover-without-latching the optimum.
+    # wide: the same Gaussian with a wall-clock budget. The state-gated phase
+    # clock can hold the pick segment open all episode, so unbounded per-step
+    # proximity is a hover farm; the budget restores v1's bound. (A run
+    # trained on pure potential shaping approached the book but never
+    # latched: nothing paid for STAYING in the latch basin.)
     pick_params: dict = {
         "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
         "book_name": "book",
         "std": 0.06,
     }
     if wide:
-        pick_params["potential"] = True
+        pick_params["time_budget_s"] = WIDE_PICK_BUDGET_S
     cfg.rewards["pick_proximity"] = RewardTermCfg(
         func=microduck_mdp.courier_pick_proximity,
-        weight=30.0 if wide else 8.0,
+        weight=8.0,
         params=pick_params,
     )
     grasp_params: dict = {
@@ -225,8 +228,11 @@ def make_microduck_courier_env_cfg(
     cfg.rewards["grasp_edge"] = RewardTermCfg(
         # This non-zero term also updates the kinematic grasp before all
         # carry/place rewards. RewardManager skips weight-0 terms entirely.
+        # Wide pays the latch as a salient one-shot (RewardManager scales by
+        # step_dt, so 250 is a 5.0 bonus): the latch is the bottleneck event
+        # and an edge cannot be farmed.
         func=microduck_mdp.courier_update_grasp_edge,
-        weight=12.0,
+        weight=250.0 if wide else 12.0,
         params=grasp_params,
     )
     cfg.rewards["carry_progress"] = RewardTermCfg(

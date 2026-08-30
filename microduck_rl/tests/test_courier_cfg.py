@@ -163,12 +163,17 @@ def test_courier_wide_cfg_distinct_from_v1():
     assert "randomize_motor_gains" in wide.events
     assert "randomize_book_inertia" in wide.events
     assert "book_friction" in wide.events
-    # Pick shaping: v1 keeps the absolute Gaussian under its bounded window;
-    # wide must be potential-based or the held pick phase becomes a farm.
+    # Pick shaping: v1 keeps the plain absolute Gaussian (bounded by its
+    # wall-clock pick window); wide bounds the same Gaussian with an explicit
+    # time budget so the held pick phase cannot be farmed, and pays the latch
+    # as a salient one-shot edge.
+    assert "time_budget_s" not in v1.rewards["pick_proximity"].params
     assert "potential" not in v1.rewards["pick_proximity"].params
     assert v1.rewards["pick_proximity"].weight == 8.0
-    assert wide.rewards["pick_proximity"].params["potential"] is True
-    assert wide.rewards["pick_proximity"].weight == 30.0
+    assert v1.rewards["grasp_edge"].weight == 12.0
+    assert wide.rewards["pick_proximity"].params["time_budget_s"] == 5.0
+    assert wide.rewards["pick_proximity"].weight == 8.0
+    assert wide.rewards["grasp_edge"].weight == 250.0
 
 
 def test_courier_wide_spawns_polar_with_curriculum():
@@ -403,6 +408,16 @@ def test_courier_pick_potential_pays_approach_not_hover():
     robot.data.site_pos_w = torch.tensor([[[0.0, 0.0, 0.10]]])
     retreat = mdp.courier_pick_proximity(env, asset_cfg=_SITE_CFG, potential=True)
     assert retreat.item() == 0.0
+
+    # Time-budgeted absolute mode: the Gaussian pays inside the budget and
+    # goes silent after it, so a held-open pick phase cannot be farmed.
+    robot.data.site_pos_w = torch.tensor([[[0.13, 0.0, 0.03]]])
+    env.episode_length_buf = torch.tensor([0])
+    inside = mdp.courier_pick_proximity(env, asset_cfg=_SITE_CFG, time_budget_s=5.0)
+    assert inside.item() > 0.3
+    env.episode_length_buf = torch.tensor([300])  # 6 s at 50 Hz
+    outside = mdp.courier_pick_proximity(env, asset_cfg=_SITE_CFG, time_budget_s=5.0)
+    assert outside.item() == 0.0
 
 
 def test_courier_legacy_settle_zero_keeps_v1_semantics():

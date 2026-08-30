@@ -7540,16 +7540,23 @@ def courier_pick_proximity(
     book_name: str = "book",
     std: float = 0.06,
     potential: bool = False,
+    time_budget_s: float | None = None,
 ) -> torch.Tensor:
     """Mouth-to-book shaping, pick phase only. Ungraspable if already holding.
 
-    Two modes. Absolute (v1): a per-step Gaussian on mouth-to-book distance,
-    safe because the wall-clock phase window bounds how long it can pay.
-    Potential (wide): pay only DECREASES in mouth-to-book distance, mirroring
-    carry_progress. The wide task's state-gated phase clock can hold the pick
-    segment open for the whole episode, so a per-step absolute bonus would
-    make hovering next to the book without latching the optimal policy; a
-    potential pays zero for hovering and cannot be farmed.
+    Modes:
+      Absolute (v1): a per-step Gaussian on mouth-to-book distance, safe
+        because the wall-clock phase window bounds how long it can pay.
+      Absolute + time_budget_s (wide): the same Gaussian, but paid only for
+        the first ``time_budget_s`` seconds of the episode. The wide task's
+        state-gated phase clock can hold the pick segment open all episode,
+        so an unbounded per-step bonus is a hover farm; a wall-clock budget
+        restores v1's bound while keeping the local basin gradient that
+        makes the latch discoverable (a wide run trained on pure potential
+        shaping approached the book but essentially never latched: the
+        potential pays nothing for STAYING near the book).
+      Potential: pay only decreases in mouth-to-book distance. Unfarmable,
+        but provides no incentive to remain in the latch basin.
     """
     _courier_buffers(env)
     robot: Entity = env.scene["robot"]
@@ -7558,6 +7565,10 @@ def courier_pick_proximity(
     mouth = robot.data.site_pos_w[:, asset_cfg.site_ids[0], :]
     dist = torch.linalg.norm(mouth - book.data.root_link_pos_w, dim=-1)
     gate = (phase < COURIER_PICK_END).float() * (~env._courier_grasped).float()
+    if time_budget_s is not None:
+        step_dt = max(float(env.step_dt), 1.0e-6)
+        episode_time = env.episode_length_buf.float() * step_dt
+        gate = gate * (episode_time < time_budget_s).float()
     if potential:
         prev = env._courier_prev_mouth_dist
         fresh = prev < 0.0

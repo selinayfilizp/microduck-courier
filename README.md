@@ -119,10 +119,14 @@ around it:
 - **Servo-gain DR** (KP/KD scale), a classic XL330 sim2real axis that v1's
   flags declared but never wired.
 - Episodes are 14 s to leave room for the longer routes.
-- **Potential-based pick shaping**: because the gated clock can hold the pick
-  segment open indefinitely, the v1 per-step proximity Gaussian would make
-  hovering next to the book the optimal policy. The wide task pays only
-  decreases in mouth-to-book distance, which cannot be farmed.
+- **Time-budgeted pick shaping**: because the gated clock can hold the pick
+  segment open indefinitely, an unbounded per-step proximity Gaussian would
+  make hovering next to the book the optimal policy. The wide task pays the
+  Gaussian only inside a 5 s wall-clock budget and pays the grasp latch as a
+  salient one-shot bonus. (Both halves matter: a first wide run using pure
+  potential-based shaping produced a policy that approached the book but
+  essentially never latched, because nothing paid for staying in the latch
+  basin.)
 
 Evaluate a wide checkpoint with
 `--task Mjlab-Courier-Wide-MicroDuck` (the horizon then defaults to the 14 s
