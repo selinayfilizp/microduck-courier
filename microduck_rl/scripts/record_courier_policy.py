@@ -24,6 +24,8 @@ from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 import mjlab_microduck.tasks  # noqa: F401  (register task entry points)
+from mjlab_microduck.onnx_policy import OnnxPolicy
+from mjlab_microduck.provenance import provenance
 
 
 TASK_ID = "Mjlab-Courier-Flat-MicroDuck"
@@ -42,29 +44,41 @@ def record(
     story_push_speed: float,
     story_push_time: float,
     require_stumble_recovery: bool,
+    task_id: str = TASK_ID,
+    use_onnx: bool = False,
+    track: bool = False,
 ) -> None:
     if not checkpoint.is_file():
-        raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
+        raise FileNotFoundError(f"Policy not found: {checkpoint}")
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    env_cfg = load_env_cfg(TASK_ID, play=True)
-    agent_cfg = load_rl_cfg(TASK_ID)
+    env_cfg = load_env_cfg(task_id, play=True)
+    agent_cfg = load_rl_cfg(task_id)
     env_cfg.scene.num_envs = 1
     env_cfg.seed = seed
     env_cfg.viewer.width = width
     env_cfg.viewer.height = height
+    if track:
+        # Follow the trunk instead of filming from a fixed world point, so
+        # every play-mode respawn heading stays in frame for the full clip.
+        env_cfg.viewer.origin_type = type(env_cfg.viewer).OriginType.ASSET_BODY
+        env_cfg.viewer.entity_name = "robot"
+        env_cfg.viewer.lookat = (0.0, 0.0, 0.04)
 
     base_env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode="rgb_array")
     env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
-    runner_cls = load_runner_cls(TASK_ID) or MjlabOnPolicyRunner
-    runner = runner_cls(env, asdict(agent_cfg), device=device)
-    runner.load(
-        str(checkpoint),
-        load_cfg={"actor": True},
-        strict=True,
-        map_location=device,
-    )
-    policy = runner.get_inference_policy(device=device)
+    if use_onnx:
+        policy = OnnxPolicy(checkpoint, device=device)
+    else:
+        runner_cls = load_runner_cls(task_id) or MjlabOnPolicyRunner
+        runner = runner_cls(env, asdict(agent_cfg), device=device)
+        runner.load(
+            str(checkpoint),
+            load_cfg={"actor": True},
+            strict=True,
+            map_location=device,
+        )
+        policy = runner.get_inference_policy(device=device)
     obs = env.get_observations()
 
     system_ffmpeg = shutil.which("ffmpeg")
@@ -174,6 +188,9 @@ def record(
         f"failures={len(failure_times)}"
     )
     metadata = {
+        **provenance(checkpoint, task_id),
+        "policy_format": "onnx" if use_onnx else "checkpoint",
+        "tracking_camera": track,
         "checkpoint": str(checkpoint),
         "output": str(output),
         "seed": seed,
@@ -223,7 +240,24 @@ def record(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("checkpoint", type=Path)
+    parser.add_argument(
+        "checkpoint",
+        type=Path,
+        nargs="?",
+        help="Torch checkpoint (.pt). Mutually exclusive with --onnx.",
+    )
+    parser.add_argument(
+        "--onnx",
+        type=Path,
+        default=None,
+        help="Exported deployment ONNX to roll out instead of a checkpoint.",
+    )
+    parser.add_argument("--task", default=TASK_ID)
+    parser.add_argument(
+        "--track",
+        action="store_true",
+        help="Camera follows the trunk so play-mode respawns stay in frame.",
+    )
     parser.add_argument("--output", type=Path, default=Path("clips/courier-policy.mp4"))
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--fps", type=int, default=30)
@@ -262,8 +296,13 @@ def main() -> None:
         parser.error("seconds, fps, width, and height must all be positive")
     if args.width % 2 or args.height % 2:
         parser.error("width and height must be even for yuv420p video")
+    if (args.checkpoint is None) == (args.onnx is None):
+        parser.error("Provide exactly one of: a checkpoint path, or --onnx")
     record(
-        checkpoint=args.checkpoint.resolve(),
+        checkpoint=(args.onnx or args.checkpoint).resolve(),
+        task_id=args.task,
+        use_onnx=args.onnx is not None,
+        track=args.track,
         output=args.output.resolve(),
         seconds=args.seconds,
         fps=args.fps,

@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Evaluate a courier checkpoint across parallel, full-task apartment rollouts."""
+"""Evaluate a courier policy across parallel, full-task apartment rollouts.
+
+Two policy sources:
+
+  checkpoint  a torch .pt loaded through the task's runner (training format)
+  --onnx      an exported deployment ONNX (normalizer baked in), which means
+              the COMMITTED artifact is evaluable by anyone without the
+              checkpoint. CI runs exactly this on every push.
+
+The task defaults to the v1 courier; pass --task Mjlab-Courier-Wide-MicroDuck
+to evaluate against the wide distribution.
+"""
 
 from __future__ import annotations
 
@@ -16,32 +27,44 @@ from mjlab.rl import MjlabOnPolicyRunner, RslRlVecEnvWrapper
 from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 import mjlab_microduck.tasks  # noqa: F401  (register task entry points)
+from mjlab_microduck.onnx_policy import OnnxPolicy
+from mjlab_microduck.provenance import provenance
 
 
-TASK_ID = "Mjlab-Courier-Flat-MicroDuck"
+DEFAULT_TASK_ID = "Mjlab-Courier-Flat-MicroDuck"
 
 
-def evaluate(checkpoint: Path, num_envs: int, seconds: float, seed: int) -> dict:
-    if not checkpoint.is_file():
-        raise FileNotFoundError(f"Checkpoint not found: {checkpoint}")
+def evaluate(
+    policy_path: Path,
+    num_envs: int,
+    seconds: float,
+    seed: int,
+    task_id: str = DEFAULT_TASK_ID,
+    use_onnx: bool = False,
+) -> dict:
+    if not policy_path.is_file():
+        raise FileNotFoundError(f"Policy not found: {policy_path}")
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    env_cfg = load_env_cfg(TASK_ID, play=True)
-    agent_cfg = load_rl_cfg(TASK_ID)
+    env_cfg = load_env_cfg(task_id, play=True)
+    agent_cfg = load_rl_cfg(task_id)
     env_cfg.scene.num_envs = num_envs
     env_cfg.seed = seed
 
     base_env = ManagerBasedRlEnv(cfg=env_cfg, device=device)
     env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
-    runner_cls = load_runner_cls(TASK_ID) or MjlabOnPolicyRunner
-    runner = runner_cls(env, asdict(agent_cfg), device=device)
-    runner.load(
-        str(checkpoint),
-        load_cfg={"actor": True},
-        strict=True,
-        map_location=device,
-    )
-    policy = runner.get_inference_policy(device=device)
+    if use_onnx:
+        policy = OnnxPolicy(policy_path, device=device)
+    else:
+        runner_cls = load_runner_cls(task_id) or MjlabOnPolicyRunner
+        runner = runner_cls(env, asdict(agent_cfg), device=device)
+        runner.load(
+            str(policy_path),
+            load_cfg={"actor": True},
+            strict=True,
+            map_location=device,
+        )
+        policy = runner.get_inference_policy(device=device)
     obs = env.get_observations()
 
     saw_grasp = torch.zeros(num_envs, dtype=torch.bool, device=device)
@@ -90,7 +113,8 @@ def evaluate(checkpoint: Path, num_envs: int, seconds: float, seed: int) -> dict
         first_delivery_step[first_delivery_step >= 0].float() * base_env.step_dt
     )
     return {
-        "checkpoint": str(checkpoint),
+        **provenance(policy_path, task_id),
+        "policy_format": "onnx" if use_onnx else "checkpoint",
         "device": device,
         "seed": seed,
         "num_envs": num_envs,
@@ -118,7 +142,19 @@ def evaluate(checkpoint: Path, num_envs: int, seconds: float, seed: int) -> dict
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("checkpoint", type=Path)
+    parser.add_argument(
+        "checkpoint",
+        type=Path,
+        nargs="?",
+        help="Torch checkpoint (.pt). Mutually exclusive with --onnx.",
+    )
+    parser.add_argument(
+        "--onnx",
+        type=Path,
+        default=None,
+        help="Exported deployment ONNX to evaluate instead of a checkpoint.",
+    )
+    parser.add_argument("--task", default=DEFAULT_TASK_ID)
     parser.add_argument("--num-envs", type=int, default=32)
     parser.add_argument("--seconds", type=float, default=8.0)
     parser.add_argument("--seed", type=int, default=42)
@@ -127,19 +163,48 @@ def main() -> None:
         action="store_true",
         help="Exit non-zero unless at least one full-task rollout delivers.",
     )
+    parser.add_argument(
+        "--min-delivery-rate",
+        type=float,
+        default=None,
+        help="Exit non-zero when delivery_rate falls below this bound (CI gate).",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Also write the result JSON to this path.",
+    )
     args = parser.parse_args()
     if args.num_envs <= 0 or args.seconds <= 0:
         parser.error("num-envs and seconds must be positive")
+    if (args.checkpoint is None) == (args.onnx is None):
+        parser.error("Provide exactly one of: a checkpoint path, or --onnx")
 
+    policy_path = (args.onnx or args.checkpoint).resolve()
     result = evaluate(
-        checkpoint=args.checkpoint.resolve(),
+        policy_path=policy_path,
         num_envs=args.num_envs,
         seconds=args.seconds,
         seed=args.seed,
+        task_id=args.task,
+        use_onnx=args.onnx is not None,
     )
-    print(json.dumps(result, indent=2))
+    text = json.dumps(result, indent=2)
+    print(text)
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text + "\n")
     if args.require_success and result["delivered"] == 0:
         raise SystemExit("No full-task delivery observed")
+    if (
+        args.min_delivery_rate is not None
+        and result["delivery_rate"] < args.min_delivery_rate
+    ):
+        raise SystemExit(
+            f"delivery_rate {result['delivery_rate']:.3f} is below the "
+            f"required {args.min_delivery_rate:.3f}"
+        )
 
 
 if __name__ == "__main__":

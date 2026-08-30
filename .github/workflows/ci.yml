@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    name: Test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: microduck_rl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: microduck_rl/uv.lock
+      - run: uv sync --no-progress
+      - run: uv run --with pytest pytest -q
+
+  policy-proof:
+    # The README claims the trained policy delivers. This job makes that claim
+    # continuously true: it rolls out the COMMITTED deployment ONNX in the real
+    # mjlab environment on CPU, with play-mode perturbations enabled, and fails
+    # the build unless every rollout delivers the book.
+    name: Delivery proof (committed ONNX)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: microduck_rl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: microduck_rl/uv.lock
+      - run: uv sync --no-progress
+      - name: Roll out artifacts/courier-policy.onnx and require 8/8 deliveries
+        run: >
+          uv run python scripts/evaluate_courier_policy.py
+          --onnx ../artifacts/courier-policy.onnx
+          --num-envs 8 --seconds 20 --seed 1042
+          --require-success --min-delivery-rate 1.0
