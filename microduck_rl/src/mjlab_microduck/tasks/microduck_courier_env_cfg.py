@@ -22,6 +22,7 @@ upright / smoothness are regularizers, not the objective.
 
 import math
 from copy import deepcopy
+from dataclasses import replace as _dc_replace
 
 ENABLE_SYMMETRY = False
 
@@ -54,6 +55,46 @@ BOOK_OFFSET = (0.16, 0.0)
 PERSON_OFFSET = (0.55, 0.0)
 BOOK_NOISE_XY = 0.02
 PERSON_NOISE_XY = 0.03
+
+# Wide-task (v2) constants. The wide variant replaces the memorized
+# straight-ahead route with a polar spawn distribution (distance range plus
+# bearing range, curriculum-widened), a state-gated phase clock, settle-checked
+# delivery, object-level DR, perception-style noise on the courier command
+# slots, and the servo-gain DR that v1 left off. v1 stays byte-identical so
+# the shipped checkpoint remains evaluable.
+EPISODE_LENGTH_WIDE_S = 14.0
+COURIER_WIDE_PERIOD = 14.0
+WIDE_HOLD_EPS = 0.02
+WIDE_HANDOFF_DIST = 0.18
+WIDE_SETTLE_STEPS = 5
+WIDE_SPAWN_FINAL = {
+    "book_radius_range": (0.12, 0.35),
+    "book_bearing_deg": 60.0,
+    "person_radius_range": (0.40, 0.90),
+    "person_bearing_deg": 90.0,
+}
+WIDE_SPAWN_STAGES = [
+    {
+        "step": 0,
+        "book_radius_range": (0.14, 0.22),
+        "book_bearing_deg": 15.0,
+        "person_radius_range": (0.45, 0.65),
+        "person_bearing_deg": 20.0,
+    },
+    {
+        "step": 1000 * 24,
+        "book_radius_range": (0.12, 0.30),
+        "book_bearing_deg": 45.0,
+        "person_radius_range": (0.40, 0.80),
+        "person_bearing_deg": 60.0,
+    },
+    {"step": 2000 * 24, **WIDE_SPAWN_FINAL},
+]
+KP_RANDOMIZATION_RANGE = (0.85, 1.15)
+KD_RANDOMIZATION_RANGE = (0.9, 1.1)
+BOOK_MASS_SCALE_RANGE = (0.6, 1.4)
+BOOK_FRICTION_RANGE = (0.6, 1.6)
+COMMAND_SLOT_NOISE = 0.02
 
 _LEG_JOINTS  = [0, 1, 2, 3, 4, 9, 10, 11, 12, 13]
 _NECK_JOINTS = [5, 6, 7, 8]
@@ -89,8 +130,16 @@ from mjlab_microduck.tasks.microduck_velocity_env_cfg import HEAD_BODY_NAMES
 from mjlab_microduck.tasks.symmetry import PpoWithSymmetryCfg, SYMMETRY_CFG
 
 
-def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
-    """Create the book-courier environment (flat terrain only)."""
+def make_microduck_courier_env_cfg(
+    play: bool = False, wide: bool = False
+) -> ManagerBasedRlEnvCfg:
+    """Create the book-courier environment (flat terrain only).
+
+    ``wide=False`` is the v1 task the shipped checkpoint was trained on and
+    must stay byte-identical. ``wide=True`` is the v2 task: polar spawn
+    distribution with curriculum, state-gated phases, settle-checked delivery,
+    book DR, noisy command slots, and servo-gain DR.
+    """
     feet_ground_cfg = ContactSensorCfg(
         name="feet_ground_contact",
         primary=ContactMatch(
@@ -129,7 +178,7 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     cfg.viewer.elevation = -18.0
     cfg.viewer.azimuth = 120.0
     cfg.viewer.max_extra_envs = 0
-    cfg.episode_length_s = EPISODE_LENGTH_S
+    cfg.episode_length_s = EPISODE_LENGTH_WIDE_S if wide else EPISODE_LENGTH_S
     cfg.sim.nconmax = 50
 
     joint_pos_action = cfg.actions["joint_pos"]
@@ -158,15 +207,20 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
             "std": 0.06,
         },
     )
+    grasp_params: dict = {
+        "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
+        "book_name": "book",
+    }
+    if wide:
+        # Settle-checked delivery: released near the reader is not enough, the
+        # free book must rest on the floor inside the radius for N steps.
+        grasp_params["settle_steps"] = WIDE_SETTLE_STEPS
     cfg.rewards["grasp_edge"] = RewardTermCfg(
         # This non-zero term also updates the kinematic grasp before all
         # carry/place rewards. RewardManager skips weight-0 terms entirely.
         func=microduck_mdp.courier_update_grasp_edge,
         weight=12.0,
-        params={
-            "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
-            "book_name": "book",
-        },
+        params=grasp_params,
     )
     cfg.rewards["carry_progress"] = RewardTermCfg(
         func=microduck_mdp.courier_carry_progress,
@@ -290,6 +344,17 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
         cfg.observations[group].terms["body_command"] = ObservationTermCfg(
             func=microduck_mdp.courier_person_command,
         )
+    if wide:
+        # Perception-style corruption on the actor's object observations only.
+        # Every proprio term already trains against noise and delay; the wide
+        # task extends that to the book/reader estimates a deployed perception
+        # stack would provide. The critic keeps clean privileged copies.
+        for term_name in ("head_command", "body_command"):
+            term = cfg.observations["actor"].terms[term_name]
+            term.noise = Unoise(n_min=-COMMAND_SLOT_NOISE, n_max=COMMAND_SLOT_NOISE)
+            term.delay_min_lag = 0
+            term.delay_max_lag = 2
+            term.delay_update_period = 64
 
     cfg.observations["critic"].terms["book_position"] = ObservationTermCfg(
         func=microduck_mdp.courier_book_pos_in_base, params={"asset_name": "book"},
@@ -305,14 +370,31 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     command.rel_standing_envs = 0.0
     command.rel_heading_envs = 0.0
     command.debug_vis = False
-    cfg.commands["twist"] = microduck_mdp.GroundPickPhaseCommandCfg(
-        **{
-            **vars(command),
-            "class_type": microduck_mdp.GroundPickPhaseCommand,
-            "period": COURIER_PERIOD,
-            "randomize_phase": False,
-        }
-    )
+    if wide:
+        # State-gated phase clock: wall time cannot cross a phase boundary the
+        # task state has not earned (see CourierPhaseCommand).
+        cfg.commands["twist"] = microduck_mdp.CourierPhaseCommandCfg(
+            **{
+                **vars(command),
+                "class_type": microduck_mdp.CourierPhaseCommand,
+                "period": COURIER_WIDE_PERIOD,
+                "randomize_phase": False,
+                "pick_end": microduck_mdp.COURIER_PICK_END,
+                "carry_end": microduck_mdp.COURIER_CARRY_END,
+                "hold_eps": WIDE_HOLD_EPS,
+                "handoff_dist": WIDE_HANDOFF_DIST,
+                "book_name": "book",
+            }
+        )
+    else:
+        cfg.commands["twist"] = microduck_mdp.GroundPickPhaseCommandCfg(
+            **{
+                **vars(command),
+                "class_type": microduck_mdp.GroundPickPhaseCommand,
+                "period": COURIER_PERIOD,
+                "randomize_phase": False,
+            }
+        )
 
     cfg.terminations["nan_state"] = TerminationTermCfg(
         func=microduck_mdp.robot_state_is_nan,
@@ -343,19 +425,29 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
             "standing_z_max": 0.12,
         },
     )
+    reset_courier_params: dict = {
+        "book_offset": BOOK_OFFSET,
+        "person_offset": PERSON_OFFSET,
+        "book_noise_xy": BOOK_NOISE_XY,
+        "person_noise_xy": PERSON_NOISE_XY,
+        "asset_name": "book",
+        "reader_name": "reader",
+        "pregrasp_fraction": 0.0 if play else 0.5,
+        "near_reader_fraction": 0.0 if play else 0.25,
+    }
+    if wide:
+        # Play/eval always runs the FULL target distribution; training starts
+        # at the narrow stage and the spawn curriculum widens the live event
+        # term cfg from there.
+        spawn = dict(WIDE_SPAWN_FINAL) if play else {
+            k: v for k, v in WIDE_SPAWN_STAGES[0].items() if k != "step"
+        }
+        reset_courier_params.update(spawn)
+        reset_courier_params["book_yaw_random"] = True
     cfg.events["reset_courier"] = EventTermCfg(
         func=microduck_mdp.reset_courier_props,
         mode="reset",
-        params={
-            "book_offset": BOOK_OFFSET,
-            "person_offset": PERSON_OFFSET,
-            "book_noise_xy": BOOK_NOISE_XY,
-            "person_noise_xy": PERSON_NOISE_XY,
-            "asset_name": "book",
-            "reader_name": "reader",
-            "pregrasp_fraction": 0.0 if play else 0.5,
-            "near_reader_fraction": 0.0 if play else 0.25,
-        },
+        params=reset_courier_params,
     )
 
     if not play:
@@ -424,6 +516,41 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
                 "scale_range": JOINT_FRICTION_RANDOMIZATION_RANGE,
             },
         )
+    if wide:
+        # Servo-gain DR, a classic XL330 sim2real axis v1 left off. Same
+        # wiring as the ball-kick task; the flags alone are not consumed
+        # anywhere, the event term is what makes them real.
+        cfg.events["randomize_motor_gains"] = EventTermCfg(
+            func=microduck_mdp.randomize_delayed_actuator_gains,
+            mode="reset",
+            params={
+                "asset_cfg": SceneEntityCfg("robot"),
+                "operation": "scale",
+                "kp_range": KP_RANDOMIZATION_RANGE,
+                "kd_range": KD_RANDOMIZATION_RANGE,
+            },
+        )
+        # Object-level DR: the manipulated book stops being a single constant.
+        # mjlab's dr ops re-read compile-time defaults, so neither accumulates.
+        _bm_lo, _bm_hi = BOOK_MASS_SCALE_RANGE
+        cfg.events["randomize_book_inertia"] = EventTermCfg(
+            func=dr.pseudo_inertia,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("book", body_names=("book",)),
+                "alpha_range": (math.log(_bm_lo) / 2.0, math.log(_bm_hi) / 2.0),
+            },
+        )
+        cfg.events["book_friction"] = EventTermCfg(
+            func=dr.geom_friction,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg("book", geom_names=("book_cover",)),
+                "operation": "abs",
+                "ranges": BOOK_FRICTION_RANGE,
+                "shared_random": True,
+            },
+        )
 
     cfg.scene.terrain.terrain_type = "plane"
     cfg.scene.terrain.terrain_generator = None
@@ -466,13 +593,23 @@ def make_microduck_courier_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
                 ],
             },
         )
+    if wide:
+        cfg.curriculum["spawn_width"] = CurriculumTermCfg(
+            func=microduck_mdp.courier_spawn_curriculum,
+            params={
+                "event_name": "reset_courier",
+                "spawn_stages": WIDE_SPAWN_STAGES,
+            },
+        )
     if play:
         # Evaluation/recording should exercise the configured perturbation.
         # Leaving the training curricula active would immediately rewrite the
-        # play-mode push range to the step-0 value of exactly zero.
+        # play-mode push range to the step-0 value of exactly zero (and the
+        # play-mode spawn distribution back to the narrow first stage).
         cfg.curriculum.pop("action_rate_weight", None)
         cfg.curriculum.pop("com_range", None)
         cfg.curriculum.pop("push_magnitude", None)
+        cfg.curriculum.pop("spawn_width", None)
     return cfg
 
 
@@ -513,4 +650,12 @@ MicroduckCourierRlCfg = RslRlOnPolicyRunnerCfg(
     save_interval=250,
     num_steps_per_env=24,
     max_iterations=10_000,
+)
+
+# The wide task shares the PPO recipe; only the experiment identity differs so
+# checkpoints and logs never mix with v1 runs.
+MicroduckCourierWideRlCfg = _dc_replace(
+    MicroduckCourierRlCfg,
+    experiment_name="book_courier_wide",
+    run_name="book_courier_wide",
 )

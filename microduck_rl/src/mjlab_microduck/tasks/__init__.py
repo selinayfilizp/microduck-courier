@@ -38,6 +38,7 @@ from .microduck_ball_kick_env_cfg import (
 from .microduck_courier_env_cfg import (
     make_microduck_courier_env_cfg,
     MicroduckCourierRlCfg,
+    MicroduckCourierWideRlCfg,
 )
 from .microduck_sitstand_env_cfg import (
     make_microduck_sitstand_env_cfg,
@@ -166,6 +167,16 @@ register_mjlab_task(
     env_cfg=make_microduck_courier_env_cfg(),
     play_env_cfg=make_microduck_courier_env_cfg(play=True),
     rl_cfg=MicroduckCourierRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Wide courier (v2): polar spawn distribution with curriculum, state-gated
+# phases, settle-checked delivery, book DR, noisy command slots, gain DR.
+register_mjlab_task(
+    task_id="Mjlab-Courier-Wide-MicroDuck",
+    env_cfg=make_microduck_courier_env_cfg(wide=True),
+    play_env_cfg=make_microduck_courier_env_cfg(play=True, wide=True),
+    rl_cfg=MicroduckCourierWideRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
 

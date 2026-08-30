@@ -5034,6 +5034,82 @@ class GroundPickPhaseCommandCfg(UniformVelocityCommandCfg):
         return GroundPickPhaseCommand(self, env)
 
 
+class CourierPhaseCommand(GroundPickPhaseCommand):
+    """State-gated phase clock for the courier task (wide variant).
+
+    Keeps the exact cos/sin encoding, period field, and reverse-curriculum
+    phase-start handling of GroundPickPhaseCommand, so the 61-D obs contract
+    and the courier reward gates are untouched. The difference is that wall
+    time alone can no longer push an episode across a phase boundary the task
+    state has not earned:
+
+      pick  -> carry  requires the grasp latch to be closed
+      carry -> place  requires the grasped book within handoff_dist of reader
+
+    While a gate is closed the phase saturates just below the boundary, so a
+    slow pick keeps pick-shaped rewards and observations instead of dying on
+    an open-loop schedule. The episode timeout stays the fallback for
+    episodes that never earn a transition. Gating only ever blocks a crossing;
+    it never pulls an episode's phase backward (a delivered episode releases
+    the latch without being yanked back into the pick segment). Phase is also
+    one-shot for the courier: it clamps just below 1.0 instead of wrapping,
+    because a delivery has no second lap.
+    """
+
+    def __init__(self, cfg, env: ManagerBasedRlEnv):
+        super().__init__(cfg, env)
+        self._pick_end = float(getattr(cfg, "pick_end", 0.35))
+        self._carry_end = float(getattr(cfg, "carry_end", 0.75))
+        self._hold_eps = float(getattr(cfg, "hold_eps", 0.02))
+        self._handoff_dist = float(getattr(cfg, "handoff_dist", 0.18))
+        self._book_name = str(getattr(cfg, "book_name", "book"))
+
+    def compute(self, dt: float) -> None:
+        prev = self._gp_phase
+        cand = prev + dt / self._period
+        grasped = getattr(self._env, "_courier_grasped", None)
+        person_xy = getattr(self._env, "_courier_person_xy", None)
+        if grasped is not None and person_xy is not None:
+            pick_cap = self._pick_end - self._hold_eps
+            blocked_pick = (
+                ~grasped & (prev < self._pick_end) & (cand >= pick_cap)
+            )
+            cand = torch.where(
+                blocked_pick, torch.full_like(cand, pick_cap), cand
+            )
+            book: Entity = self._env.scene[self._book_name]
+            dist = torch.linalg.norm(
+                book.data.root_link_pos_w[:, :2] - person_xy, dim=-1
+            )
+            carry_cap = self._carry_end - self._hold_eps
+            blocked_carry = (
+                grasped
+                & (dist > self._handoff_dist)
+                & (prev < self._carry_end)
+                & (cand >= carry_cap)
+            )
+            cand = torch.where(
+                blocked_carry, torch.full_like(cand, carry_cap), cand
+            )
+        self._gp_phase = torch.clamp(cand, max=1.0 - 1.0e-4)
+        self.vel_command_b[:, 0] = torch.cos(2 * torch.pi * self._gp_phase)
+        self.vel_command_b[:, 1] = torch.sin(2 * torch.pi * self._gp_phase)
+        self.vel_command_b[:, 2] = 0.0
+
+
+@_dataclass(kw_only=True)
+class CourierPhaseCommandCfg(GroundPickPhaseCommandCfg):
+    class_type: type = CourierPhaseCommand
+    pick_end: float = 0.35
+    carry_end: float = 0.75
+    hold_eps: float = 0.02
+    handoff_dist: float = 0.18
+    book_name: str = "book"
+
+    def build(self, env: ManagerBasedRlEnv) -> "CourierPhaseCommand":
+        return CourierPhaseCommand(self, env)
+
+
 # --------------------------------------------------------------------------- #
 # Unified pose command machinery                                               #
 # --------------------------------------------------------------------------- #
@@ -7235,6 +7311,8 @@ def _courier_buffers(env: ManagerBasedRlEnv) -> None:
         env._courier_delivered = torch.zeros(n, dtype=torch.bool, device=dev)
         env._courier_was_delivered = torch.zeros(n, dtype=torch.bool, device=dev)
         env._courier_phase_start = torch.zeros(n, device=dev)
+        env._courier_released = torch.zeros(n, dtype=torch.bool, device=dev)
+        env._courier_settle_count = torch.zeros(n, dtype=torch.int64, device=dev)
 
 
 def reset_courier_props(
@@ -7250,12 +7328,25 @@ def reset_courier_props(
     pregrasp_fraction: float = 0.0,
     near_reader_fraction: float = 0.0,
     near_reader_offset: float = 0.14,
+    book_radius_range: tuple | None = None,
+    book_bearing_deg: float = 0.0,
+    person_radius_range: tuple | None = None,
+    person_bearing_deg: float = 0.0,
+    book_yaw_random: bool = False,
 ):
     """Reset the delivery scene, with optional reverse-curriculum starts.
 
     Training mixes full pick episodes with pre-grasped carry episodes and a
     smaller set of near-reader placement episodes. Play/evaluation passes zero
     fractions and therefore always starts from the complete task.
+
+    Two spawn parameterizations:
+      legacy (radius ranges None): fixed offset plus centimeter xy noise, the
+        v1 straight-ahead route the original checkpoint was trained on.
+      polar (radius ranges set): distance sampled from the range and bearing
+        sampled uniformly within +-bearing_deg of straight ahead, both in the
+        robot's yaw frame. This is the wide-task distribution; the spawn
+        curriculum mutates these params on the live event term cfg.
     """
     if env_ids is None or len(env_ids) == 0:
         return
@@ -7272,14 +7363,27 @@ def reset_courier_props(
     origin = env.scene.terrain.env_origins[env_ids]
 
     n = len(env_ids)
-    off = torch.tensor(book_offset, device=env.device, dtype=torch.float).repeat(n, 1)
-    off += (torch.rand(n, 2, device=env.device) * 2.0 - 1.0) * book_noise_xy
+    if book_radius_range is not None:
+        radius = torch.empty(n, device=env.device).uniform_(*book_radius_range)
+        bearing_max = math.radians(book_bearing_deg)
+        bearing = torch.empty(n, device=env.device).uniform_(-bearing_max, bearing_max)
+        off = torch.stack(
+            (radius * torch.cos(bearing), radius * torch.sin(bearing)), dim=-1
+        )
+    else:
+        off = torch.tensor(book_offset, device=env.device, dtype=torch.float).repeat(n, 1)
+        off += (torch.rand(n, 2, device=env.device) * 2.0 - 1.0) * book_noise_xy
 
     pose = torch.zeros(n, 7, device=env.device)
     pose[:, 0] = root[:, 0] + cos_y * off[:, 0] - sin_y * off[:, 1]
     pose[:, 1] = root[:, 1] + sin_y * off[:, 0] + cos_y * off[:, 1]
     pose[:, 2] = origin[:, 2] + book_half_z
-    pose[:, 3] = 1.0
+    if book_yaw_random:
+        book_yaw = torch.empty(n, device=env.device).uniform_(-math.pi, math.pi)
+        pose[:, 3] = torch.cos(book_yaw / 2.0)
+        pose[:, 6] = torch.sin(book_yaw / 2.0)
+    else:
+        pose[:, 3] = 1.0
     book.write_root_link_pose_to_sim(pose, env_ids)
     book.write_root_link_velocity_to_sim(torch.zeros(n, 6, device=env.device), env_ids)
 
@@ -7291,8 +7395,16 @@ def reset_courier_props(
     pregrasp = curriculum_draw < pregrasp_fraction
     near_reader = curriculum_draw < near_reader_fraction
 
-    p_off = torch.tensor(person_offset, device=env.device, dtype=torch.float).repeat(n, 1)
-    p_off += (torch.rand(n, 2, device=env.device) * 2.0 - 1.0) * person_noise_xy
+    if person_radius_range is not None:
+        p_radius = torch.empty(n, device=env.device).uniform_(*person_radius_range)
+        p_bearing_max = math.radians(person_bearing_deg)
+        p_bearing = torch.empty(n, device=env.device).uniform_(-p_bearing_max, p_bearing_max)
+        p_off = torch.stack(
+            (p_radius * torch.cos(p_bearing), p_radius * torch.sin(p_bearing)), dim=-1
+        )
+    else:
+        p_off = torch.tensor(person_offset, device=env.device, dtype=torch.float).repeat(n, 1)
+        p_off += (torch.rand(n, 2, device=env.device) * 2.0 - 1.0) * person_noise_xy
     p_off[near_reader] = torch.tensor(
         (near_reader_offset, 0.0), device=env.device, dtype=torch.float
     )
@@ -7310,6 +7422,8 @@ def reset_courier_props(
     env._courier_was_grasped[env_ids] = pregrasp
     env._courier_delivered[env_ids] = False
     env._courier_was_delivered[env_ids] = False
+    env._courier_released[env_ids] = False
+    env._courier_settle_count[env_ids] = 0
     env._courier_phase_start[env_ids] = 0.0
     env._courier_phase_start[env_ids[pregrasp]] = COURIER_PICK_END + 0.01
     env._courier_phase_start[env_ids[near_reader]] = COURIER_CARRY_END + 0.01
@@ -7332,8 +7446,19 @@ def courier_update_grasp(
     grasp_dist: float = COURIER_GRASP_DIST,
     place_dist: float = COURIER_PLACE_DIST,
     book_half_z: float = COURIER_BOOK_HALF_Z,
+    settle_steps: int = 0,
+    settle_speed: float = 0.08,
+    settle_z_tol: float = 0.02,
 ) -> torch.Tensor:
-    """Latch grasp / release and kinematically carry the book. Weight 0 — side effect."""
+    """Latch grasp / release and kinematically carry the book. Weight 0 — side effect.
+
+    With ``settle_steps == 0`` (v1 semantics) the delivered latch closes on the
+    release step itself. With ``settle_steps > 0`` (wide task) release and
+    delivery are decoupled: the book is released near the reader, then the
+    delivered latch closes only after the free book has rested on the floor,
+    inside the place radius, below ``settle_speed``, for ``settle_steps``
+    consecutive steps. A drop that bounces out of the radius never counts.
+    """
     _courier_buffers(env)
     robot: Entity = env.scene["robot"]
     book: Entity = env.scene[book_name]
@@ -7349,12 +7474,38 @@ def courier_update_grasp(
     in_carry = (phase >= COURIER_PICK_END) & (phase < COURIER_CARRY_END)
     in_place = phase >= COURIER_CARRY_END
 
-    can_grab = (in_pick | in_carry) & (dist_mouth < grasp_dist) & ~env._courier_delivered
+    can_grab = (
+        (in_pick | in_carry)
+        & (dist_mouth < grasp_dist)
+        & ~env._courier_delivered
+        & ~env._courier_released
+    )
     env._courier_grasped = env._courier_grasped | can_grab
 
     should_drop = in_place & (dist_person < place_dist)
-    env._courier_delivered = env._courier_delivered | (env._courier_grasped & should_drop)
+    releasing = env._courier_grasped & should_drop
+    env._courier_released = env._courier_released | releasing
     env._courier_grasped = env._courier_grasped & ~should_drop
+    if settle_steps <= 0:
+        env._courier_delivered = env._courier_delivered | releasing
+    else:
+        speed = torch.linalg.norm(book.data.root_link_vel_w[:, :3], dim=-1)
+        origin_z = env.scene.terrain.env_origins[:, 2]
+        settled_now = (
+            env._courier_released
+            & ~env._courier_delivered
+            & (dist_person < place_dist)
+            & (book_pos[:, 2] - origin_z < book_half_z + settle_z_tol)
+            & (speed < settle_speed)
+        )
+        env._courier_settle_count = torch.where(
+            settled_now,
+            env._courier_settle_count + 1,
+            torch.zeros_like(env._courier_settle_count),
+        )
+        env._courier_delivered = env._courier_delivered | (
+            env._courier_settle_count >= settle_steps
+        )
 
     held = env._courier_grasped
     if held.any():
@@ -7404,6 +7555,9 @@ def courier_update_grasp_edge(
     book_name: str = "book",
     grasp_dist: float = COURIER_GRASP_DIST,
     place_dist: float = COURIER_PLACE_DIST,
+    settle_steps: int = 0,
+    settle_speed: float = 0.08,
+    settle_z_tol: float = 0.02,
 ) -> torch.Tensor:
     """Update the grasp/carry state and pay once when the latch closes.
 
@@ -7416,6 +7570,9 @@ def courier_update_grasp_edge(
         book_name=book_name,
         grasp_dist=grasp_dist,
         place_dist=place_dist,
+        settle_steps=settle_steps,
+        settle_speed=settle_speed,
+        settle_z_tol=settle_z_tol,
     )
     return courier_grasp_edge(env)
 
@@ -7534,3 +7691,38 @@ def courier_person_command(env: ManagerBasedRlEnv) -> torch.Tensor:
     return torch.cat(
         (person, torch.zeros(env.num_envs, 3, device=env.device)), dim=-1
     )
+
+
+def courier_spawn_curriculum(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    event_name: str,
+    spawn_stages: list[dict],
+) -> torch.Tensor:
+    """Widen the polar spawn distribution as training progresses.
+
+    Each stage dict carries 'step' plus any subset of the polar spawn params
+    of ``reset_courier_props`` ('book_radius_range', 'book_bearing_deg',
+    'person_radius_range', 'person_bearing_deg'). Follows the proven
+    params-curriculum pattern (see ``push_curriculum``): mutate the live
+    EventManager term cfg, never ``env.cfg.events`` (managers deepcopy their
+    cfg at init, so writes to env.cfg are silent no-ops). Returns the current
+    max book radius so the stage is visible in training logs.
+    """
+    del env_ids
+    event_cfg = env.event_manager.get_term_cfg(event_name)
+    current = spawn_stages[0]
+    for stage in spawn_stages:
+        if env.common_step_counter > stage["step"]:
+            current = stage
+    for key in (
+        "book_radius_range",
+        "book_bearing_deg",
+        "person_radius_range",
+        "person_bearing_deg",
+    ):
+        if key in current:
+            event_cfg.params[key] = current[key]
+    book_radius_range = event_cfg.params.get("book_radius_range")
+    max_radius = book_radius_range[1] if book_radius_range else 0.0
+    return torch.tensor(float(max_radius), device=env.device)
