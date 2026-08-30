@@ -37,6 +37,26 @@ def git_commit() -> str | None:
         return None
 
 
+def repo_relative(path: str | Path) -> str:
+    """Repo-relative form of a path, for sidecars published in the repo.
+
+    Absolute local paths leak the author's machine layout into public
+    artifacts; the SHA-256 already identifies the exact bytes. Falls back to
+    the basename when the path lies outside the repo.
+    """
+    p = Path(path).resolve()
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=Path(__file__).resolve().parent,
+            stderr=subprocess.DEVNULL,
+        )
+        root = Path(out.decode().strip())
+        return p.relative_to(root).as_posix()
+    except (OSError, subprocess.CalledProcessError, ValueError):
+        return p.name
+
+
 def provenance(policy_path: str | Path, task_id: str) -> dict:
     return {
         "timestamp_utc": _dt.datetime.now(_dt.timezone.utc).isoformat(
@@ -44,6 +64,6 @@ def provenance(policy_path: str | Path, task_id: str) -> dict:
         ),
         "git_commit": git_commit(),
         "task": task_id,
-        "policy_file": str(policy_path),
+        "policy_file": repo_relative(policy_path),
         "policy_sha256": file_sha256(policy_path),
     }

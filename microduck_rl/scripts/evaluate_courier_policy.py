@@ -37,7 +37,7 @@ DEFAULT_TASK_ID = "Mjlab-Courier-Flat-MicroDuck"
 def evaluate(
     policy_path: Path,
     num_envs: int,
-    seconds: float,
+    seconds: float | None,
     seed: int,
     task_id: str = DEFAULT_TASK_ID,
     use_onnx: bool = False,
@@ -47,6 +47,8 @@ def evaluate(
 
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     env_cfg = load_env_cfg(task_id, play=True)
+    if seconds is None:
+        seconds = float(env_cfg.episode_length_s)
     agent_cfg = load_rl_cfg(task_id)
     env_cfg.scene.num_envs = num_envs
     env_cfg.seed = seed
@@ -156,7 +158,14 @@ def main() -> None:
     )
     parser.add_argument("--task", default=DEFAULT_TASK_ID)
     parser.add_argument("--num-envs", type=int, default=32)
-    parser.add_argument("--seconds", type=float, default=8.0)
+    parser.add_argument(
+        "--seconds",
+        type=float,
+        default=None,
+        help="Rollout horizon. Defaults to the task's episode length (8 s for "
+        "v1, 14 s for the wide task, whose phase timing makes any horizon "
+        "under one episode structurally deliver zero).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--require-success",
@@ -176,7 +185,7 @@ def main() -> None:
         help="Also write the result JSON to this path.",
     )
     args = parser.parse_args()
-    if args.num_envs <= 0 or args.seconds <= 0:
+    if args.num_envs <= 0 or (args.seconds is not None and args.seconds <= 0):
         parser.error("num-envs and seconds must be positive")
     if (args.checkpoint is None) == (args.onnx is None):
         parser.error("Provide exactly one of: a checkpoint path, or --onnx")

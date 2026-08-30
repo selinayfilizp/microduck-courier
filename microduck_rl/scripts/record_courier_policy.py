@@ -25,7 +25,7 @@ from mjlab.tasks.registry import load_env_cfg, load_rl_cfg, load_runner_cls
 
 import mjlab_microduck.tasks  # noqa: F401  (register task entry points)
 from mjlab_microduck.onnx_policy import OnnxPolicy
-from mjlab_microduck.provenance import provenance
+from mjlab_microduck.provenance import provenance, repo_relative
 
 
 TASK_ID = "Mjlab-Courier-Flat-MicroDuck"
@@ -191,8 +191,7 @@ def record(
         **provenance(checkpoint, task_id),
         "policy_format": "onnx" if use_onnx else "checkpoint",
         "tracking_camera": track,
-        "checkpoint": str(checkpoint),
-        "output": str(output),
+        "output": repo_relative(output),
         "seed": seed,
         "seconds": seconds,
         "fps": fps,

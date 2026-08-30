@@ -163,6 +163,12 @@ def test_courier_wide_cfg_distinct_from_v1():
     assert "randomize_motor_gains" in wide.events
     assert "randomize_book_inertia" in wide.events
     assert "book_friction" in wide.events
+    # Pick shaping: v1 keeps the absolute Gaussian under its bounded window;
+    # wide must be potential-based or the held pick phase becomes a farm.
+    assert "potential" not in v1.rewards["pick_proximity"].params
+    assert v1.rewards["pick_proximity"].weight == 8.0
+    assert wide.rewards["pick_proximity"].params["potential"] is True
+    assert wide.rewards["pick_proximity"].weight == 30.0
 
 
 def test_courier_wide_spawns_polar_with_curriculum():
@@ -346,6 +352,57 @@ def test_courier_settle_bounced_drop_never_counts():
     assert int(env._courier_settle_count[0]) == 0
     # And the released book cannot be silently re-grasped either.
     assert not bool(env._courier_grasped[0])
+
+
+def test_courier_pick_potential_pays_approach_not_hover():
+    class _PickPhaseCommand:
+        _gp_phase = torch.tensor([0.2])
+
+    class _PickCommandManager:
+        def get_term(self, _name):
+            return _PickPhaseCommand()
+
+    class _RobotData:
+        def __init__(self):
+            self.site_pos_w = torch.tensor([[[0.0, 0.0, 0.10]]])
+
+    class _Robot:
+        def __init__(self):
+            self.data = _RobotData()
+
+    class _BookData:
+        root_link_pos_w = torch.tensor([[0.16, 0.0, 0.006]])
+
+    class _Book:
+        data = _BookData()
+
+    class _Env:
+        num_envs = 1
+        device = "cpu"
+        step_dt = 0.02
+
+        def __init__(self):
+            self.command_manager = _PickCommandManager()
+            self.scene = {"book": _Book(), "robot": _Robot()}
+
+    env = _Env()
+    mdp._courier_buffers(env)
+    robot = env.scene["robot"]
+
+    # First call after reset: the sentinel pays zero and records the distance.
+    first = mdp.courier_pick_proximity(env, asset_cfg=_SITE_CFG, potential=True)
+    assert first.item() == 0.0
+    # Approaching the book pays the (positive) distance decrease per second.
+    robot.data.site_pos_w = torch.tensor([[[0.10, 0.0, 0.05]]])
+    approach = mdp.courier_pick_proximity(env, asset_cfg=_SITE_CFG, potential=True)
+    assert approach.item() > 1.0
+    # Hovering in place pays exactly nothing: the farm is closed.
+    hover = mdp.courier_pick_proximity(env, asset_cfg=_SITE_CFG, potential=True)
+    assert hover.item() == 0.0
+    # Retreating pays nothing either (clamped, like carry_progress).
+    robot.data.site_pos_w = torch.tensor([[[0.0, 0.0, 0.10]]])
+    retreat = mdp.courier_pick_proximity(env, asset_cfg=_SITE_CFG, potential=True)
+    assert retreat.item() == 0.0
 
 
 def test_courier_legacy_settle_zero_keeps_v1_semantics():

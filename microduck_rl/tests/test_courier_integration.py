@@ -64,13 +64,24 @@ def test_courier_env_spawn_geometry_and_stepping(
 
         radii = []
         bearings = []
+        person_radii = []
         for _ in range(12):
             obs, _ = env.reset()
             radius, bearing = _book_polar_in_robot_frame(env)
             radii.append(radius)
             bearings.append(bearing)
+            # The wide (polar) contract anchors the reader on the ROBOT ROOT;
+            # the legacy task anchors it on the env origin.
+            if expect_wide_bearings:
+                anchor = env.scene["robot"].data.root_link_pos_w[:, :2]
+            else:
+                anchor = env.scene.terrain.env_origins[:, :2]
+            person_radii.append(
+                torch.linalg.norm(env._courier_person_xy - anchor, dim=-1)
+            )
         radii = torch.cat(radii)
         bearings = torch.cat(bearings)
+        person_radius = torch.cat(person_radii)
 
         assert radii.min() >= radius_lo - 0.01
         assert radii.max() <= radius_hi + 0.01
@@ -79,9 +90,8 @@ def test_courier_env_spawn_geometry_and_stepping(
             # 24 draws from +-60 degrees essentially never all land within 15.
             assert bearings.abs().max() > math.radians(15.0)
 
-        # Reader placement: within the configured radius band of the origin.
-        person = env._courier_person_xy - env.scene.terrain.env_origins[:, :2]
-        person_radius = torch.linalg.norm(person, dim=-1)
+        # Reader placement: within the configured radius band of its anchor,
+        # across every reset (24 samples per task).
         if expect_wide_bearings:
             assert person_radius.min() >= 0.40 - 0.01
             assert person_radius.max() <= 0.90 + 0.01

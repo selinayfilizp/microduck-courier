@@ -7313,6 +7313,7 @@ def _courier_buffers(env: ManagerBasedRlEnv) -> None:
         env._courier_phase_start = torch.zeros(n, device=dev)
         env._courier_released = torch.zeros(n, dtype=torch.bool, device=dev)
         env._courier_settle_count = torch.zeros(n, dtype=torch.int64, device=dev)
+        env._courier_prev_mouth_dist = torch.full((n,), -1.0, device=dev)
 
 
 def reset_courier_props(
@@ -7408,8 +7409,16 @@ def reset_courier_props(
     p_off[near_reader] = torch.tensor(
         (near_reader_offset, 0.0), device=env.device, dtype=torch.float
     )
-    env._courier_person_xy[env_ids, 0] = origin[:, 0] + cos_y * p_off[:, 0] - sin_y * p_off[:, 1]
-    env._courier_person_xy[env_ids, 1] = origin[:, 1] + sin_y * p_off[:, 0] + cos_y * p_off[:, 1]
+    # Polar mode anchors the reader on the ROBOT ROOT, like the book, so the
+    # sampled distance/bearing contract holds regardless of where reset_base
+    # scattered the robot (up to +-0.5 m from the env origin). The legacy
+    # branch keeps the origin anchor byte-identical for the v1 checkpoint.
+    if person_radius_range is not None:
+        p_anchor_x, p_anchor_y = root[:, 0], root[:, 1]
+    else:
+        p_anchor_x, p_anchor_y = origin[:, 0], origin[:, 1]
+    env._courier_person_xy[env_ids, 0] = p_anchor_x + cos_y * p_off[:, 0] - sin_y * p_off[:, 1]
+    env._courier_person_xy[env_ids, 1] = p_anchor_y + sin_y * p_off[:, 0] + cos_y * p_off[:, 1]
 
     reader_pose = torch.zeros(n, 7, device=env.device)
     reader_pose[:, :2] = env._courier_person_xy[env_ids]
@@ -7424,6 +7433,7 @@ def reset_courier_props(
     env._courier_was_delivered[env_ids] = False
     env._courier_released[env_ids] = False
     env._courier_settle_count[env_ids] = 0
+    env._courier_prev_mouth_dist[env_ids] = -1.0
     env._courier_phase_start[env_ids] = 0.0
     env._courier_phase_start[env_ids[pregrasp]] = COURIER_PICK_END + 0.01
     env._courier_phase_start[env_ids[near_reader]] = COURIER_CARRY_END + 0.01
@@ -7450,7 +7460,10 @@ def courier_update_grasp(
     settle_speed: float = 0.08,
     settle_z_tol: float = 0.02,
 ) -> torch.Tensor:
-    """Latch grasp / release and kinematically carry the book. Weight 0 — side effect.
+    """Latch grasp / release and kinematically carry the book.
+
+    Runs as the side effect of a nonzero reward term (courier_update_grasp_edge,
+    weight 12.0), because mjlab's RewardManager skips weight-0 terms entirely.
 
     With ``settle_steps == 0`` (v1 semantics) the delivered latch closes on the
     release step itself. With ``settle_steps > 0`` (wide task) release and
@@ -7526,16 +7539,34 @@ def courier_pick_proximity(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
     book_name: str = "book",
     std: float = 0.06,
+    potential: bool = False,
 ) -> torch.Tensor:
-    """Mouth-to-book Gaussian, pick phase only. Ungraspable if already holding."""
+    """Mouth-to-book shaping, pick phase only. Ungraspable if already holding.
+
+    Two modes. Absolute (v1): a per-step Gaussian on mouth-to-book distance,
+    safe because the wall-clock phase window bounds how long it can pay.
+    Potential (wide): pay only DECREASES in mouth-to-book distance, mirroring
+    carry_progress. The wide task's state-gated phase clock can hold the pick
+    segment open for the whole episode, so a per-step absolute bonus would
+    make hovering next to the book without latching the optimal policy; a
+    potential pays zero for hovering and cannot be farmed.
+    """
     _courier_buffers(env)
     robot: Entity = env.scene["robot"]
     book: Entity = env.scene[book_name]
     phase = _courier_phase(env)
     mouth = robot.data.site_pos_w[:, asset_cfg.site_ids[0], :]
     dist = torch.linalg.norm(mouth - book.data.root_link_pos_w, dim=-1)
-    prox = torch.exp(-(dist / std) ** 2)
     gate = (phase < COURIER_PICK_END).float() * (~env._courier_grasped).float()
+    if potential:
+        prev = env._courier_prev_mouth_dist
+        fresh = prev < 0.0
+        delta = torch.clamp(prev - dist, min=0.0)
+        delta = torch.where(fresh, torch.zeros_like(delta), delta)
+        env._courier_prev_mouth_dist = dist.detach()
+        step_dt = max(float(env.step_dt), 1.0e-6)
+        return torch.nan_to_num((delta / step_dt) * gate, nan=0.0)
+    prox = torch.exp(-(dist / std) ** 2)
     return torch.nan_to_num(prox * gate, nan=0.0)
 
 

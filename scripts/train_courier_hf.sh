@@ -15,8 +15,11 @@ fi
 #     ./scripts/train_courier_hf.sh
 COURIER_TASK="${COURIER_TASK:-Mjlab-Courier-Wide-MicroDuck}"
 COURIER_HF_FLAVOR="${COURIER_HF_FLAVOR:-l4x1}"
-COURIER_HF_TIMEOUT="${COURIER_HF_TIMEOUT:-3h}"
-COURIER_ITERS="${COURIER_ITERS:-3000}"
+# The wide task's final spawn-curriculum stage lands at iteration 2000; the
+# repo guidance for curriculum-heavy tasks is 4000-6000 iterations, so leave
+# real consolidation time after the distribution reaches full width.
+COURIER_HF_TIMEOUT="${COURIER_HF_TIMEOUT:-5h}"
+COURIER_ITERS="${COURIER_ITERS:-4000}"
 
 # CPU wiring smoke test before the paid job (AGENTS.md: never launch a long
 # run without one). Catches config errors locally for zero dollars.

@@ -53,9 +53,10 @@ README has always claimed: 32/32 rollouts deliver, zero failed episodes
 result JSON carries provenance: timestamp, git commit, and the SHA-256 of the
 exact policy file.
 
-CI runs this same rollout on every push (`policy-proof` job) and fails the
-build unless every episode delivers. The badge above is not "the linter
-passed"; it is "the duck still delivers the book".
+CI runs the same rollout at smaller scale on every push (`policy-proof` job:
+8 envs, same seed, same environment) and fails the build unless every episode
+delivers. The badge above is not "the linter passed"; it is "the duck still
+delivers the book".
 
 ## 2. Duck in the apartment (interactive)
 
@@ -76,8 +77,9 @@ Walk it with the official gait (arrow keys in the terminal, not the viewer):
 
 ## 3. The trained v1 policy
 
-The selected L4 checkpoint is `model_750.pt` from the Hugging Face model repo
-`selinayfilizp/mjlab-courier-flat-microduck-20260828-134647`. The paid job was
+The selected L4 checkpoint is `model_750.pt` from the private Hugging Face
+model repo `selinayfilizp/mjlab-courier-flat-microduck-20260828-134647` (the
+ONNX export committed in this repo is the public artifact). The paid job was
 stopped after this checkpoint passed the full task, instead of spending the
 remaining budget.
 
@@ -117,12 +119,20 @@ around it:
 - **Servo-gain DR** (KP/KD scale), a classic XL330 sim2real axis that v1's
   flags declared but never wired.
 - Episodes are 14 s to leave room for the longer routes.
+- **Potential-based pick shaping**: because the gated clock can hold the pick
+  segment open indefinitely, the v1 per-step proximity Gaussian would make
+  hovering next to the book the optimal policy. The wide task pays only
+  decreases in mouth-to-book distance, which cannot be farmed.
+
+Evaluate a wide checkpoint with
+`--task Mjlab-Courier-Wide-MicroDuck` (the horizon then defaults to the 14 s
+episode; anything shorter can never observe a delivery in this task).
 
 ### Train it
 
 ```bash
-uv run hf auth login   # once
-./scripts/train_courier_hf.sh
+cd microduck_rl && uv run hf auth login   # once
+cd .. && ./scripts/train_courier_hf.sh
 ```
 
 The script now runs a free CPU wiring smoke test before submitting the paid
@@ -146,6 +156,7 @@ Record a real policy rollout (checkpoint or committed ONNX) and reject
 unsuccessful or visually incomplete seeds automatically:
 
 ```bash
+cd microduck_rl
 uv run python scripts/record_courier_policy.py \
   --onnx ../artifacts/courier-policy.onnx \
   --output ../clips/courier-policy.mp4 --seconds 20 --seed 14 \
@@ -159,10 +170,11 @@ exists). The recorder uses the actual mjlab environment and policy
 observations and emits a JSON sidecar with grasp, stumble, recovery, and
 delivery times plus provenance (timestamp, git commit, policy SHA-256).
 
-The 8-second single-episode cut for posting comes from the 20-second clip:
+The 8-second single-episode cut for posting comes from the 20-second clip
+(same `microduck_rl` working directory as the record command):
 
 ```bash
-ffmpeg -i clips/courier-policy.mp4 -t 8 -c copy clips/courier-episode1-8s.mp4
+ffmpeg -i ../clips/courier-policy.mp4 -t 8 -c copy ../clips/courier-episode1-8s.mp4
 ```
 
 A deterministic scripted storyboard also exists

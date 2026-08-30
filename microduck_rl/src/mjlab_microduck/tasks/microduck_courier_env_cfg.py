@@ -198,14 +198,21 @@ def make_microduck_courier_env_cfg(
         if name in cfg.rewards:
             del cfg.rewards[name]
 
+    # v1: absolute Gaussian, safe under the bounded wall-clock pick window.
+    # wide: potential-based (pay only approach progress), because the state-
+    # gated phase clock can hold the pick segment open all episode and a
+    # per-step absolute bonus would make hover-without-latching the optimum.
+    pick_params: dict = {
+        "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
+        "book_name": "book",
+        "std": 0.06,
+    }
+    if wide:
+        pick_params["potential"] = True
     cfg.rewards["pick_proximity"] = RewardTermCfg(
         func=microduck_mdp.courier_pick_proximity,
-        weight=8.0,
-        params={
-            "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
-            "book_name": "book",
-            "std": 0.06,
-        },
+        weight=30.0 if wide else 8.0,
+        params=pick_params,
     )
     grasp_params: dict = {
         "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
