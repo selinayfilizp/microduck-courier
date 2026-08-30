@@ -1,8 +1,8 @@
 {
-  "timestamp_utc": "2026-08-30T07:26:18+00:00",
-  "git_commit": "52d1f39d7c5ac6a897c096f338aff6a669266ccc",
+  "timestamp_utc": "2026-08-30T08:03:58+00:00",
+  "git_commit": "862199db2f09d271fed87a2cbe509b2c82c3eaf8",
   "task": "Mjlab-Courier-Flat-MicroDuck",
-  "policy_file": "/Users/selinay/Downloads/claude/microduck-courier/artifacts/courier-policy.onnx",
+  "policy_file": "artifacts/courier-policy.onnx",
   "policy_sha256": "c95396269a48bbab3ebd46032f6c40bc1323ccb7a6a933487ad75810d8785c47",
   "policy_format": "onnx",
   "device": "cpu",
