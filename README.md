@@ -132,6 +132,26 @@ Evaluate a wide checkpoint with
 `--task Mjlab-Courier-Wide-MicroDuck` (the horizon then defaults to the 14 s
 episode; anything shorter can never observe a delivery in this task).
 
+### v2 results (trained 2026-08-30, L4 on HF Jobs, 4000 iterations in ~80 min)
+
+Strict CPU eval on the FULL wide distribution (books 12-35 cm at ±60°,
+readers 40-90 cm at ±90°, all DR active, settle-checked delivery), 28 s
+rollouts, from the committed `artifacts/courier-wide-policy.onnx`:
+
+- Seed 1042: 32/32 grasps, 27/32 deliveries, zero falls.
+- Seed 42: 32/32 grasps, 28/32 deliveries, zero falls.
+- The training checkpoint scores 29/32 on seed 1042; mean first delivery
+  is 13-15 s. Misses are timeouts, not falls or wrong placements.
+
+Getting here took three GPU runs and two verified bug fixes, both documented
+because they are the actual lesson: (1) pure potential-based pick shaping
+trained a policy that approached the book but never latched (see the shaping
+bullet above); (2) the phase gate originally PULLED PROGRESS BACK while the
+duck oscillated around the handoff radius, so a policy carrying the book to
+within 1 cm of the reader could never enter the place segment. A one-line
+hold-at-max fix took the same checkpoint from 0/16 to 29/32. CI now rolls out
+the wide ONNX too (`wide-policy-proof`, 6/8 gate).
+
 ### Train it
 
 ```bash
@@ -192,6 +212,10 @@ real rollouts with their sidecars.
 - [Rollout telemetry](artifacts/courier-policy.json) and [tracked-rollout telemetry](artifacts/courier-policy-track.json)
 - [61-input, 14-action ONNX policy](artifacts/courier-policy.onnx)
 - [ONNX eval result with provenance](artifacts/courier-policy.eval.json)
+- [v2 wide-task ONNX policy](artifacts/courier-wide-policy.onnx) with its
+  [full-distribution eval](artifacts/courier-wide-policy.eval.json), plus the
+  [14-second single-episode wide rollout](artifacts/courier-wide-policy.mp4)
+  and [telemetry](artifacts/courier-wide-policy.json)
 
 The video is a real policy rollout, not the scripted storyboard. The training
 checkpoint lives on Hugging Face; the ONNX deployment export is committed here

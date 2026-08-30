@@ -48,3 +48,29 @@ jobs:
           --onnx ../artifacts/courier-policy.onnx
           --num-envs 8 --seconds 20 --seed 1042
           --require-success --min-delivery-rate 1.0
+
+  wide-policy-proof:
+    # Same idea for the v2 wide task: roll out the committed wide ONNX on the
+    # FULL spawn distribution. The wide policy delivers ~86 percent across
+    # seeds (32/32 grasps, zero falls), so the gate is 6/8 rather than 8/8.
+    name: Wide delivery proof (committed ONNX)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: microduck_rl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: microduck_rl/uv.lock
+      - run: uv sync --no-progress
+      - name: Roll out artifacts/courier-wide-policy.onnx, require 6/8 deliveries
+        run: >
+          uv run python scripts/evaluate_courier_policy.py
+          --onnx ../artifacts/courier-wide-policy.onnx
+          --task Mjlab-Courier-Wide-MicroDuck
+          --num-envs 8 --seconds 28 --seed 1042
+          --require-success --min-delivery-rate 0.75

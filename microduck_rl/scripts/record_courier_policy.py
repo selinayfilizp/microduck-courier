@@ -47,6 +47,9 @@ def record(
     task_id: str = TASK_ID,
     use_onnx: bool = False,
     track: bool = False,
+    cam_distance: float | None = None,
+    cam_elevation: float | None = None,
+    no_props: bool = False,
 ) -> None:
     if not checkpoint.is_file():
         raise FileNotFoundError(f"Policy not found: {checkpoint}")
@@ -64,6 +67,19 @@ def record(
         env_cfg.viewer.origin_type = type(env_cfg.viewer).OriginType.ASSET_BODY
         env_cfg.viewer.entity_name = "robot"
         env_cfg.viewer.lookat = (0.0, 0.0, 0.04)
+    if cam_distance is not None:
+        env_cfg.viewer.distance = cam_distance
+    if cam_elevation is not None:
+        # A higher vantage (e.g. -35) keeps the non-colliding apartment walls
+        # from occluding wide-task routes that run close to them.
+        env_cfg.viewer.elevation = cam_elevation
+    if no_props and "apartment" in env_cfg.scene.entities:
+        # The walls and rug are non-colliding set dressing; wide-task routes
+        # are random and often put them between the tracking camera and the
+        # robot. Dropping them changes nothing about the task physics.
+        env_cfg.scene.entities = {
+            k: v for k, v in env_cfg.scene.entities.items() if k != "apartment"
+        }
 
     base_env = ManagerBasedRlEnv(cfg=env_cfg, device=device, render_mode="rgb_array")
     env = RslRlVecEnvWrapper(base_env, clip_actions=agent_cfg.clip_actions)
@@ -257,6 +273,25 @@ def main() -> None:
         action="store_true",
         help="Camera follows the trunk so play-mode respawns stay in frame.",
     )
+    parser.add_argument(
+        "--cam-distance",
+        type=float,
+        default=None,
+        help="Override viewer camera distance (meters).",
+    )
+    parser.add_argument(
+        "--cam-elevation",
+        type=float,
+        default=None,
+        help="Override viewer camera elevation in degrees; a higher vantage "
+        "(e.g. -35) avoids wall occlusion on wide-task routes.",
+    )
+    parser.add_argument(
+        "--no-props",
+        action="store_true",
+        help="Drop the non-colliding apartment walls/rug (set dressing only) "
+        "so random wide-task routes are never filmed through a wall.",
+    )
     parser.add_argument("--output", type=Path, default=Path("clips/courier-policy.mp4"))
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--fps", type=int, default=30)
@@ -302,6 +337,9 @@ def main() -> None:
         task_id=args.task,
         use_onnx=args.onnx is not None,
         track=args.track,
+        cam_distance=args.cam_distance,
+        cam_elevation=args.cam_elevation,
+        no_props=args.no_props,
         output=args.output.resolve(),
         seconds=args.seconds,
         fps=args.fps,
