@@ -1,9 +1,9 @@
 {
-  "timestamp_utc": "2026-08-30T16:27:56+00:00",
-  "git_commit": "9c9eb9251f3ef243f5119c388f97b8dfb08b40d8",
+  "timestamp_utc": "2026-08-30T17:54:20+00:00",
+  "git_commit": "288fcfec502e8ca5cda17005051eafd6c86a3ae8",
   "task": "Mjlab-Courier-Wide-MicroDuck",
   "policy_file": "artifacts/courier-wide-policy.onnx",
-  "policy_sha256": "0f784ee2179016cef893a3d7914f359d9f3b1dd64d08410ef544f129ebf2c104",
+  "policy_sha256": "8bd64cdd2896c628e41b37fb31fc7b74306456ce4b376af151bebe731e5b476f",
   "policy_format": "onnx",
   "tracking_camera": true,
   "output": "clips/courier-wide-policy.mp4",
@@ -12,11 +12,13 @@
   "fps": 30,
   "frames": 420,
   "grasp_times_s": [
-    4.48
+    5.36
   ],
-  "failure_times_s": [],
+  "failure_times_s": [
+    0.8
+  ],
   "delivery_times_s": [
-    10.92
+    11.44
   ],
   "story_push": {
     "axis": "world_y",
@@ -24,9 +26,9 @@
     "delta_velocity_m_s": 0.0,
     "applied": false
   },
-  "max_tilt_deg": 62.715596905808155,
-  "stumble_time_s": 0.48,
-  "recovery_time_s": 5.04,
+  "max_tilt_deg": 69.23978971165216,
+  "stumble_time_s": 0.54,
+  "recovery_time_s": 0.8,
   "stumble_recovery_before_success": true,
-  "failure_before_success": false
+  "failure_before_success": true
 }

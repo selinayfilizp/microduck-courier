@@ -132,25 +132,36 @@ Evaluate a wide checkpoint with
 `--task Mjlab-Courier-Wide-MicroDuck` (the horizon then defaults to the 14 s
 episode; anything shorter can never observe a delivery in this task).
 
-### v2 results (trained 2026-08-30, L4 on HF Jobs, 4000 iterations in ~80 min)
+### v2 results (trained 2026-08-30, L4 on HF Jobs)
 
 Strict CPU eval on the FULL wide distribution (books 12-35 cm at ±60°,
 readers 40-90 cm at ±90°, all DR active, settle-checked delivery), 28 s
 rollouts, from the committed `artifacts/courier-wide-policy.onnx`:
 
-- Seed 1042: 32/32 grasps, 27/32 deliveries, zero falls.
-- Seed 42: 32/32 grasps, 28/32 deliveries, zero falls.
-- The training checkpoint scores 29/32 on seed 1042; mean first delivery
-  is 13-15 s. Misses are timeouts, not falls or wrong placements.
+- Seed 1042: 32/32 grasps, 32/32 deliveries, mean first delivery 13.0 s.
+- Seed 42: 32/32 grasps, 31/32 deliveries, mean first delivery 13.1 s.
+- Honest trade: roughly one episode in six ends in a fall along the way
+  (12 and 11 failed episodes out of 64 per seed); the policy usually stands
+  back up or retries in the next episode, which is how both seeds still
+  deliver in 63/64 rollout envs. An earlier 4000-iteration policy scored
+  27-28/32 with zero falls; delivery coverage won the artifact slot.
 
-Getting here took three GPU runs and two verified bug fixes, both documented
-because they are the actual lesson: (1) pure potential-based pick shaping
-trained a policy that approached the book but never latched (see the shaping
-bullet above); (2) the phase gate originally PULLED PROGRESS BACK while the
-duck oscillated around the handoff radius, so a policy carrying the book to
-within 1 cm of the reader could never enter the place segment. A one-line
-hold-at-max fix took the same checkpoint from 0/16 to 29/32. CI now rolls out
-the wide ONNX too (`wide-policy-proof`, 6/8 gate).
+The committed policy is the 1250-iteration checkpoint of a run that trained
+on the FIXED phase dynamics and was cut short mid-curriculum; even partial,
+it beats the full 4000-iteration run that trained against the phase bug
+below. Getting here took four GPU runs and two verified bug fixes, all
+documented because they are the actual lesson:
+
+1. Pure potential-based pick shaping trained a policy that approached the
+   book but never latched (see the shaping bullet above).
+2. The phase gate originally PULLED PROGRESS BACK while the duck oscillated
+   around the handoff radius, so a policy carrying the book to within 1 cm
+   of the reader could never enter the place segment. A one-line hold-at-max
+   fix took that same checkpoint from 0/16 to 29/32, and retraining on the
+   fixed dynamics reached full delivery coverage in a third of the
+   iterations.
+
+CI rolls out the wide ONNX too (`wide-policy-proof`, 6/8 gate).
 
 ### Train it
 
