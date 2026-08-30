@@ -171,8 +171,9 @@ real rollouts with their sidecars.
 
 ## Release artifacts
 
-- [20-second trained-policy rollout](artifacts/courier-policy.mp4)
-- [Rollout telemetry](artifacts/courier-policy.json)
+- [20-second trained-policy rollout](artifacts/courier-policy.mp4) (fixed camera, the composed episode-one shot)
+- [20-second tracking-camera rollout](artifacts/courier-policy-track.mp4) (same seed 14, recorded from the committed ONNX, every episode stays in frame: deliveries at 6.0 s and 14.0 s, third grasp at 19.0 s)
+- [Rollout telemetry](artifacts/courier-policy.json) and [tracked-rollout telemetry](artifacts/courier-policy-track.json)
 - [61-input, 14-action ONNX policy](artifacts/courier-policy.onnx)
 - [ONNX eval result with provenance](artifacts/courier-policy.eval.json)
 

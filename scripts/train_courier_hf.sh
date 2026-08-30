@@ -29,7 +29,10 @@ if [ "${COURIER_SKIP_SMOKE:-0}" != "1" ]; then
   echo "[smoke] ok"
 fi
 
-exec uv run train "$COURIER_TASK" \
+# Invoke the wrapper module directly: `uv run train` can resolve to mjlab's
+# own console script (which does not know --hf-jobs) depending on which
+# package installed bin/train last.
+exec uv run python -m mjlab_microduck.train_cli "$COURIER_TASK" \
   --env.scene.num-envs 4096 \
   --agent.max-iterations "$COURIER_ITERS" \
   --agent.save-interval 250 \
