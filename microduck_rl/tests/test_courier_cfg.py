@@ -259,6 +259,25 @@ def test_courier_phase_holds_carry_until_handoff():
     assert cmd._gp_phase[1] > mdp.COURIER_CARRY_END
 
 
+def test_courier_phase_hold_never_erases_progress():
+    # Regression: a policy oscillating around the handoff radius used to have
+    # its phase progress erased (pulled back to the cap) on every blocked
+    # step, making the place segment unreachable in practice. Blocked steps
+    # must HOLD at prev, and progress must resume once the gate reopens.
+    prev = torch.tensor([0.749])
+    grasped = torch.tensor([True])
+    far_book = torch.tensor([[1.0, 0.0]])
+    person = torch.tensor([[0.5, 0.0]])
+    cmd = _make_phase_command(prev, grasped, far_book, person)
+    cmd.compute(dt=0.02)
+    assert cmd._gp_phase[0].item() >= 0.749 - 1.0e-6
+
+    near_book = torch.tensor([[0.5, 0.0]])
+    cmd = _make_phase_command(torch.tensor([0.749]), grasped, near_book, person)
+    cmd.compute(dt=0.02)
+    assert cmd._gp_phase[0].item() > 0.75
+
+
 def test_courier_phase_never_pulls_back_and_never_wraps():
     # A delivered episode has released the latch (grasped False) at high
     # phase: gating must not yank it back into the pick segment, and the

@@ -5070,12 +5070,18 @@ class CourierPhaseCommand(GroundPickPhaseCommand):
         grasped = getattr(self._env, "_courier_grasped", None)
         person_xy = getattr(self._env, "_courier_person_xy", None)
         if grasped is not None and person_xy is not None:
+            # A blocked gate HOLDS phase at max(prev, cap): it stops further
+            # advance but never erases progress already made between the cap
+            # and the boundary. The earlier torch.full_like(cap) version
+            # pulled phase back to the cap on every blocked step, so a policy
+            # oscillating around the handoff radius could hover at 0.749
+            # forever and the place segment was unreachable in practice.
             pick_cap = self._pick_end - self._hold_eps
             blocked_pick = (
                 ~grasped & (prev < self._pick_end) & (cand >= pick_cap)
             )
             cand = torch.where(
-                blocked_pick, torch.full_like(cand, pick_cap), cand
+                blocked_pick, torch.clamp(prev, min=pick_cap), cand
             )
             book: Entity = self._env.scene[self._book_name]
             dist = torch.linalg.norm(
@@ -5089,7 +5095,7 @@ class CourierPhaseCommand(GroundPickPhaseCommand):
                 & (cand >= carry_cap)
             )
             cand = torch.where(
-                blocked_carry, torch.full_like(cand, carry_cap), cand
+                blocked_carry, torch.clamp(prev, min=carry_cap), cand
             )
         self._gp_phase = torch.clamp(cand, max=1.0 - 1.0e-4)
         self.vel_command_b[:, 0] = torch.cos(2 * torch.pi * self._gp_phase)
