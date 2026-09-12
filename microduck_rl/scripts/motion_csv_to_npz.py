@@ -32,7 +32,7 @@ from mjlab_microduck.tasks.microduck_tracking_env_cfg import (
     make_microduck_tracking_env_cfg,
 )
 
-from author_toosie_reference import BEAT, JOINT_ORDER
+from author_toosie_reference import JOINT_ORDER
 
 
 def main() -> None:
@@ -43,6 +43,12 @@ def main() -> None:
     parser.add_argument("--output-fps", type=int, default=50)
     parser.add_argument(
         "--render", type=Path, default=None, help="Also write an mp4 of the replay."
+    )
+    parser.add_argument(
+        "--bpm",
+        type=float,
+        default=82.0,
+        help="Tempo used to bucket the per-beat feasibility report.",
     )
     args = parser.parse_args()
 
@@ -175,15 +181,16 @@ def main() -> None:
     foot_r_z = body_pos[:, ankle_r, 2]
     trunk_y = body_pos[:, trunk, 1]
     rest_l, rest_r = foot_l_z[0], foot_r_z[0]
-    print("\nFeasibility report (per beat):")
+    beat = 60.0 / args.bpm
+    print(f"\nFeasibility report (per beat at {args.bpm:g} BPM):")
     print("beat  window          R-foot lift  L-foot lift  trunk y end")
-    n_beats = int(t[-1] // BEAT) + 1
+    n_beats = int(t[-1] // beat) + 1
     for b in range(n_beats):
-        sel = (t >= b * BEAT) & (t < (b + 1) * BEAT)
+        sel = (t >= b * beat) & (t < (b + 1) * beat)
         if not sel.any():
             continue
         print(
-            f"{b + 1:4d}  {b * BEAT:5.2f}-{(b + 1) * BEAT:5.2f} s   "
+            f"{b + 1:4d}  {b * beat:5.2f}-{(b + 1) * beat:5.2f} s   "
             f"{(foot_r_z[sel] - rest_r).max() * 1000:8.1f} mm  "
             f"{(foot_l_z[sel] - rest_l).max() * 1000:8.1f} mm  "
             f"{trunk_y[sel][-1] * 1000:8.1f} mm"

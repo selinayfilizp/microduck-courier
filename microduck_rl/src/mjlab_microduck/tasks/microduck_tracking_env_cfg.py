@@ -52,6 +52,12 @@ from mjlab_microduck.tasks import mdp as microduck_mdp
 DEFAULT_MOTION_FILE = str(
     Path(__file__).resolve().parents[3] / "motions" / "toosie_slide.npz"
 )
+# The sped-up TikTok cut (108.70 BPM grid measured from a reference video,
+# choreography transcribed from it; compiled by ducktok from
+# choreos/toosie_slide_spedup.yaml).
+SPEDUP_MOTION_FILE = str(
+    Path(__file__).resolve().parents[3] / "motions" / "toosie_slide_spedup.npz"
+)
 
 # Trunk + feet + head: the bodies whose reference poses the reward tracks.
 TRACKED_BODY_NAMES = (

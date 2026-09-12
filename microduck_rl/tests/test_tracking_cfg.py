@@ -57,3 +57,16 @@ def test_tracking_reference_motion_is_committed_and_loops():
     body_pos = data["body_pos_w"]
     assert np.abs(body_pos[0, :, :2] - body_pos[-1, :, :2]).max() < 0.01
     assert np.isfinite(joint_pos).all() and np.isfinite(body_pos).all()
+
+
+def test_spedup_tracking_task_registered_with_own_motion():
+    from mjlab_microduck.tasks.microduck_tracking_env_cfg import SPEDUP_MOTION_FILE
+    import numpy as np
+
+    cfg = make_microduck_tracking_env_cfg(motion_file=SPEDUP_MOTION_FILE)
+    assert cfg.commands["motion"].motion_file == SPEDUP_MOTION_FILE
+    assert Path(SPEDUP_MOTION_FILE).is_file()
+    data = np.load(SPEDUP_MOTION_FILE)
+    # 4 bars of 108.7 BPM at 50 fps (compiled by ducktok).
+    assert data["joint_pos"].shape[0] in (441, 442)
+    assert np.isfinite(data["joint_pos"]).all()

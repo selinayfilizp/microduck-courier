@@ -196,6 +196,26 @@ register_mjlab_task(
     runner_cls=MotionTrackingOnPolicyRunner,
 )
 
+# The sped-up TikTok cut of the same song (108.70 BPM), choreography
+# transcribed from a reference video and compiled by ducktok.
+from dataclasses import replace as _dc_replace
+
+from .microduck_tracking_env_cfg import SPEDUP_MOTION_FILE
+
+register_mjlab_task(
+    task_id="Mjlab-Tracking-Spedup-MicroDuck",
+    env_cfg=make_microduck_tracking_env_cfg(motion_file=SPEDUP_MOTION_FILE),
+    play_env_cfg=make_microduck_tracking_env_cfg(
+        play=True, motion_file=SPEDUP_MOTION_FILE
+    ),
+    rl_cfg=_dc_replace(
+        MicroduckTrackingRlCfg,
+        experiment_name="microduck_tracking_spedup",
+        run_name="microduck_tracking_spedup",
+    ),
+    runner_cls=MotionTrackingOnPolicyRunner,
+)
+
 register_mjlab_task(
     task_id="Mjlab-GroundPick-Rough-MicroDuck",
     env_cfg=make_microduck_ground_pick_env_cfg(rough=True),
