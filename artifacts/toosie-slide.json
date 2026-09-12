@@ -1,0 +1,17 @@
+{
+  "timestamp_utc": "2026-09-12T07:15:13+00:00",
+  "git_commit": "87f840fac378eb4d03844a5e01e1b27b27e528b4",
+  "task": "Mjlab-Tracking-Flat-MicroDuck",
+  "policy_file": "microduck_rl/logs/dance_ckpts/model_3999.pt",
+  "policy_sha256": "a529c27bda44a95b40c54b7e2bc9ac74d114436d95ac2f0f312961c5ba8a8e8c",
+  "policy_format": "checkpoint",
+  "output": "clips/toosie-slide.mp4",
+  "seed": 7,
+  "seconds": 18.0,
+  "fps": 30,
+  "mean_body_tracking_error_m": 0.01863115467131138,
+  "p95_body_tracking_error_m": 0.036800503730773926,
+  "max_body_tracking_error_m": 0.0413590744137764,
+  "mean_anchor_error_m": 0.017178313806653023,
+  "falls": 0
+}

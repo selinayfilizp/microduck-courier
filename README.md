@@ -216,6 +216,33 @@ A deterministic scripted storyboard also exists
 (`scripts/view_apartment.py --demo`, explicitly watermarked); publish only
 real rollouts with their sidecars.
 
+
+## 6. The duck dances: Toosie Slide
+
+`Mjlab-Tracking-Flat-MicroDuck` ports mjlab's BeyondMimic-style motion
+imitation to the duck, and the first choreography is the Toosie Slide
+(82 BPM, one bar per cycle: right foot up, left foot slide, left foot up,
+right foot slide, head bobs on every beat). The reference motion is authored
+on a beat grid and validated kinematically for $0 before training
+([ducktok](https://github.com/selinayfilizp/ducktok) is the standalone
+compiler); training took about an hour on one L4.
+
+Result, measured over 18 s of full-physics rollout (DR active): mean tracked
+body error 18.6 mm, p95 36.8 mm, zero falls
+([telemetry](artifacts/toosie-slide.json)).
+
+- [Clean dance clip](artifacts/toosie-slide.mp4)
+- [Step-captioned cut](artifacts/toosie-slide-steps.mp4) (lyric instructions burned in on the beat grid)
+- [Ghost cut](artifacts/toosie-slide-ghost.mp4) (translucent reference overlay: watch the policy track its choreography)
+- [Dance policy ONNX](artifacts/toosie-slide-policy.onnx)
+
+Pipeline: `scripts/author_toosie_reference.py` (or a ducktok YAML) makes the
+keyframe CSV, `scripts/motion_csv_to_npz.py` replays it through the real
+model (npz + ghost video + per-beat feasibility report), train with
+`COURIER_TASK=Mjlab-Tracking-Flat-MicroDuck ./scripts/train_courier_hf.sh`,
+film with `scripts/record_tracking_policy.py`. Music goes on in post: the
+clip starts on a downbeat at 82 BPM, one bar per 2.93 s.
+
 ## Release artifacts
 
 - [20-second trained-policy rollout](artifacts/courier-policy.mp4) (fixed camera, the composed episode-one shot)
