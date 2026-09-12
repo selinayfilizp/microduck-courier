@@ -38,3 +38,7 @@ backup_onnx/
 logdir/.claude/
 logdir/
 logdir/.claude/worktrees/
+
+# Committed reference motions for the tracking tasks are NOT build artifacts.
+!motions/*.npz
+!motions/*.csv

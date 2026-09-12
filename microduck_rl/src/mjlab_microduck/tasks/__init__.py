@@ -44,6 +44,10 @@ from .microduck_sitstand_env_cfg import (
     make_microduck_sitstand_env_cfg,
     MicroduckSitStandRlCfg,
 )
+from .microduck_tracking_env_cfg import (
+    make_microduck_tracking_env_cfg,
+    MicroduckTrackingRlCfg,
+)
 from .microduck_velocity_rollers_env_cfg import (
     make_microduck_velocity_rollers_env_cfg,
     MicroduckRollersRlCfg,
@@ -178,6 +182,18 @@ register_mjlab_task(
     play_env_cfg=make_microduck_courier_env_cfg(play=True, wide=True),
     rl_cfg=MicroduckCourierWideRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Motion tracking (BeyondMimic-style) — imitate a keyframed reference motion.
+# First choreography: the Toosie Slide (motions/toosie_slide.npz).
+from mjlab.tasks.tracking.rl import MotionTrackingOnPolicyRunner
+
+register_mjlab_task(
+    task_id="Mjlab-Tracking-Flat-MicroDuck",
+    env_cfg=make_microduck_tracking_env_cfg(),
+    play_env_cfg=make_microduck_tracking_env_cfg(play=True),
+    rl_cfg=MicroduckTrackingRlCfg,
+    runner_cls=MotionTrackingOnPolicyRunner,
 )
 
 register_mjlab_task(
