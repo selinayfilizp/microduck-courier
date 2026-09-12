@@ -204,9 +204,14 @@ from .microduck_tracking_env_cfg import SPEDUP_MOTION_FILE
 
 register_mjlab_task(
     task_id="Mjlab-Tracking-Spedup-MicroDuck",
-    env_cfg=make_microduck_tracking_env_cfg(motion_file=SPEDUP_MOTION_FILE),
+    env_cfg=make_microduck_tracking_env_cfg(
+        motion_file=SPEDUP_MOTION_FILE, body_pos_weight=3.0, body_pos_std=0.035
+    ),
     play_env_cfg=make_microduck_tracking_env_cfg(
-        play=True, motion_file=SPEDUP_MOTION_FILE
+        play=True,
+        motion_file=SPEDUP_MOTION_FILE,
+        body_pos_weight=3.0,
+        body_pos_std=0.035,
     ),
     rl_cfg=_dc_replace(
         MicroduckTrackingRlCfg,

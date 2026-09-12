@@ -83,8 +83,18 @@ DUCK_VELOCITY_RANGE = {
 def make_microduck_tracking_env_cfg(
     play: bool = False,
     motion_file: str = DEFAULT_MOTION_FILE,
+    body_pos_weight: float = 1.0,
+    body_pos_std: float = 0.05,
 ) -> ManagerBasedRlEnvCfg:
-    """Create the microduck motion-tracking configuration."""
+    """Create the microduck motion-tracking configuration.
+
+    body_pos_weight / body_pos_std tune how expensive it is to miss tracked
+    body positions. The defaults reproduce the original Toosie task. The
+    sped-up task trains with 3.0 / 0.035: at the defaults, a full 4000-iter
+    run learned to SKIP the 55 mm kicks (9-15 mm executed, measured) because
+    a brief one-ankle miss barely dents the time-averaged exp reward while
+    kicking risks a termination; pricing the miss fixes the incentive.
+    """
     cfg = make_tracking_env_cfg()
 
     cfg.scene.entities = {"robot": MICRODUCK_STANDUP_ROBOT_CFG}
@@ -135,7 +145,8 @@ def make_microduck_tracking_env_cfg(
     # Tracking reward stds at duck scale (G1 position stds divided by ~6;
     # orientation and angular-velocity stds are scale-free and stay).
     cfg.rewards["motion_global_root_pos"].params["std"] = 0.05
-    cfg.rewards["motion_body_pos"].params["std"] = 0.05
+    cfg.rewards["motion_body_pos"].params["std"] = body_pos_std
+    cfg.rewards["motion_body_pos"].weight = body_pos_weight
     cfg.rewards["motion_body_lin_vel"].params["std"] = 0.3
 
     # Terminations at duck scale.
