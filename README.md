@@ -227,6 +227,8 @@ on a beat grid and validated kinematically for $0 before training
 ([ducktok](https://github.com/selinayfilizp/ducktok) is the standalone
 compiler); training took about an hour on one L4.
 
+![The Microduck performing the Toosie Slide with step captions](artifacts/toosie-slide.gif)
+
 Result, measured over 18 s of full-physics rollout (DR active): mean tracked
 body error 18.6 mm, p95 36.8 mm, zero falls
 ([telemetry](artifacts/toosie-slide.json)).
