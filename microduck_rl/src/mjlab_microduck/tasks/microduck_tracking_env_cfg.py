@@ -85,6 +85,7 @@ def make_microduck_tracking_env_cfg(
     motion_file: str = DEFAULT_MOTION_FILE,
     body_pos_weight: float = 1.0,
     body_pos_std: float = 0.05,
+    anchor_pos_weight: float = 0.5,
 ) -> ManagerBasedRlEnvCfg:
     """Create the microduck motion-tracking configuration.
 
@@ -145,9 +146,20 @@ def make_microduck_tracking_env_cfg(
     # Tracking reward stds at duck scale (G1 position stds divided by ~6;
     # orientation and angular-velocity stds are scale-free and stay).
     cfg.rewards["motion_global_root_pos"].params["std"] = 0.05
+    cfg.rewards["motion_global_root_pos"].weight = anchor_pos_weight
     cfg.rewards["motion_body_pos"].params["std"] = body_pos_std
     cfg.rewards["motion_body_pos"].weight = body_pos_weight
     cfg.rewards["motion_body_lin_vel"].params["std"] = 0.3
+
+    # The body-position tracking terms are translation-invariant (they score
+    # the reference shape transplanted onto the robot's current anchor), so
+    # GLOBAL translation like a slide is priced only by the anchor term. And
+    # the actor must be able to SEE the offset it is paid to correct: the
+    # stock G1 noise on motion_anchor_pos_b is +-0.25 m, larger than this
+    # robot's entire 75 mm slide; rescale it by the file's divide-by-6 rule.
+    cfg.observations["actor"].terms["motion_anchor_pos_b"].noise = Unoise(
+        n_min=-0.04, n_max=0.04
+    )
 
     # Terminations at duck scale.
     cfg.terminations["anchor_pos"].params["threshold"] = 0.06
