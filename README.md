@@ -250,8 +250,13 @@ at uniform tracking weights learned to SKIP the 55 mm kicks (9-15 mm
 executed) because a brief one-ankle miss is cheap under time-averaged exp
 kernels while a fast single-support kick risks termination. Pricing foot
 misses harder (body-pos weight 3.0, std 0.035) plus amplifying the
-reference kicks to 66 mm fixed it: the shipped policy kicks at 67-69 mm
-with zero falls and 22.0 mm mean tracking error
+reference kicks to 66 mm fixed the kicks, and a second measured pass fixed the
+slides (executed 0 mm at first: the shape rewards are translation-invariant
+and the actor's global-position observation carried G1-scale noise larger
+than the whole slide; the sped-up task now prices the global anchor at
+weight 3.0 and sees it through duck-scaled noise). The shipped policy
+slides 72 mm of the asked 75, kicks at 37 and 61 mm, holds 8.8 mm mean
+tracking error
 ([telemetry](artifacts/toosie-spedup.json),
 [clip](artifacts/toosie-spedup.mp4),
 [captioned cut](artifacts/toosie-spedup-steps.mp4),
