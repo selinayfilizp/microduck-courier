@@ -238,6 +238,25 @@ body error 18.6 mm, p95 36.8 mm, zero falls
 - [Ghost cut](artifacts/toosie-slide-ghost.mp4) (translucent reference overlay: watch the policy track its choreography)
 - [Dance policy ONNX](artifacts/toosie-slide-policy.onnx)
 
+### The sped-up cut (the one TikTok actually dances)
+
+The TikTok sound is the sped-up version at a measured 108.70 BPM, danced
+with a fuller-body routine. `Mjlab-Tracking-Spedup-MicroDuck` trains a
+choreography transcribed beat by beat from a reference video, compiled by
+ducktok, aligned to the sung hook, and mixed with the real audio afterward
+(the clip starts on the measured downbeat, so hits land on hits). Getting
+the kicks required a reward lesson worth keeping: a full 4000-iteration run
+at uniform tracking weights learned to SKIP the 55 mm kicks (9-15 mm
+executed) because a brief one-ankle miss is cheap under time-averaged exp
+kernels while a fast single-support kick risks termination. Pricing foot
+misses harder (body-pos weight 3.0, std 0.035) plus amplifying the
+reference kicks to 66 mm fixed it: the shipped policy kicks at 67-69 mm
+with zero falls and 22.0 mm mean tracking error
+([telemetry](artifacts/toosie-spedup.json),
+[clip](artifacts/toosie-spedup.mp4),
+[captioned cut](artifacts/toosie-spedup-steps.mp4),
+[policy ONNX](artifacts/toosie-spedup-policy.onnx)).
+
 Pipeline: `scripts/author_toosie_reference.py` (or a ducktok YAML) makes the
 keyframe CSV, `scripts/motion_csv_to_npz.py` replays it through the real
 model (npz + ghost video + per-beat feasibility report), train with

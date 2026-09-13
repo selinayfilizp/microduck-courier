@@ -1,0 +1,17 @@
+{
+  "timestamp_utc": "2026-09-13T02:35:18+00:00",
+  "git_commit": "3696db09de13d028b7cb0e0b85c9bdbb964ee4aa",
+  "task": "Mjlab-Tracking-Spedup-MicroDuck",
+  "policy_file": "microduck_rl/logs/spedup3_ckpts/model_3999.pt",
+  "policy_sha256": "5723a5e10a46e0f1c418f496d85f32b1af0efdf529398118c83abbf238aa40da",
+  "policy_format": "checkpoint",
+  "output": "clips/toosie-spedup.mp4",
+  "seed": 7,
+  "seconds": 17.66,
+  "fps": 30,
+  "mean_body_tracking_error_m": 0.02203981950879097,
+  "p95_body_tracking_error_m": 0.05801260098814964,
+  "max_body_tracking_error_m": 0.07213926315307617,
+  "mean_anchor_error_m": 0.02067106030881405,
+  "falls": 0
+}
